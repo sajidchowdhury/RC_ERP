@@ -1,0 +1,109 @@
+/* Workforce / employee — theme on branch-hub layout */
+
+.employee-theme {
+    --bh-primary: #7c3aed;
+    --bh-secondary: #0891b2;
+    --bh-accent: #059669;
+}
+
+.employee-theme .branch-hub-hero {
+    box-shadow: 0 14px 36px rgba(124, 58, 237, 0.22);
+}
+
+.employee-theme .branch-avatar,
+.employee-theme .branch-preview-card .branch-avatar,
+.employee-photo-thumb {
+    background: linear-gradient(135deg, #7c3aed, #0891b2);
+}
+
+.employee-theme .branch-code-pill {
+    color: #6d28d9;
+}
+
+.employee-theme .branch-hub-quick a:hover {
+    border-color: #7c3aed;
+    color: #7c3aed;
+    background: #f5f3ff;
+}
+
+.employee-theme .branch-aside-tip {
+    background: #f5f3ff;
+    border-color: #ddd6fe;
+    color: #5b21b6;
+}
+
+.employee-theme .branch-form-footer .btn-primary {
+    background: linear-gradient(135deg, #7c3aed, #0891b2);
+}
+
+.employee-photo-thumb {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 50%;
+    border: 1px solid var(--bh-border, #e2e8f0);
+}
+
+.employee-photo-placeholder {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    background: #f1f5f9;
+    font-size: 1.1rem;
+}
+
+.employee-role-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.employee-user-pill.active {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.employee-user-pill.inactive {
+    background: #fffbeb;
+    color: #b45309;
+}
+
+.employee-user-pill.none {
+    background: #f8fafc;
+    color: #64748b;
+}
+
+.employee-photo-upload-preview {
+    width: 120px;
+    height: 120px;
+    border: 2px dashed var(--bh-border, #e2e8f0);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #f8fafc;
+    flex-shrink: 0;
+}
+
+#employeeCards {
+    padding: 0.75rem;
+}
+
+.employee-mobile-card {
+    background: #fff;
+    border: 1px solid var(--bh-border, #e2e8f0);
+    border-radius: 14px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+}

@@ -1,0 +1,11 @@
+# Secure product images directory
+Options -Indexes
+
+<FilesMatch "\.(php|php\d|phar|phtml|pl|py|jsp|asp|sh|cgi|exe|com|bat|dll)$">
+    Require all denied
+</FilesMatch>
+
+# Allow common image formats
+<FilesMatch "\.(jpg|jpeg|png|gif|webp)$">
+    Require all granted
+</FilesMatch>

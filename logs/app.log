@@ -1,0 +1,7 @@
+{"timestamp":"2026-06-03 17:56:51","level":"error","message":"FCM token save error","context":{"error":"Cannot access protected property NotificationModel::$db"}}
+{"timestamp":"2026-06-03 17:56:54","level":"error","message":"FCM token save error","context":{"error":"Cannot access protected property NotificationModel::$db"}}
+{"timestamp":"2026-06-03 17:56:56","level":"error","message":"FCM token save error","context":{"error":"Cannot access protected property NotificationModel::$db"}}
+{"timestamp":"2026-06-03 18:07:59","level":"error","message":"FCM token save error","context":{"error":"Cannot access protected property NotificationModel::$db"}}
+{"timestamp":"2026-06-03 18:11:12","level":"error","message":"FCM token save error","context":{"error":"Cannot access protected property NotificationModel::$db"}}
+{"timestamp":"2026-06-03 19:29:23","level":"error","message":"View not found","context":{"view":"SalesAudit\/checklist"}}
+{"timestamp":"2026-06-03 19:31:07","level":"error","message":"View not found","context":{"view":"SalesAudit\/checklist"}}

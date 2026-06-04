@@ -1,0 +1,7 @@
+# Minimal .htaccess for employee photo uploads
+# Only prevent directory listing.
+# PHP execution is already blocked by parent public/.htaccess
+
+Options -Indexes
+
+# If you get 500 errors, you can safely delete this entire file.
