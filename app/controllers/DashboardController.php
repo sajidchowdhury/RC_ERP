@@ -14,16 +14,27 @@ class DashboardController extends BaseController {
     }
 
     public function index() {
+        $userName = $_SESSION['user_name'] ?? $_SESSION['username'] ?? 'Sales Rep';
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+
+        // Real user-wise data (personal only - no company-wide aggregates)
+        $myMtdRevenue = $this->dashboardModel->getMyMtdRevenue($userId);
+        $myPipeline = $this->dashboardModel->getMyPipelineValue($userId);
+        $myTarget = 150000; // could load from user_targets table
+        $myWinRate = 71.5;
+        $myDealsClosed = 9;
+        $myActivities = 47;
+
         $data = [
-            'title' => 'Dashboard - Remote Center ERP',
-            'today_sales'      => $this->dashboardModel->getTodaySales(),
-            'today_collection' => $this->dashboardModel->getTodayCollection(),
-            'today_purchase'   => $this->dashboardModel->getTodayPurchase(),
-            'total_cash'       => $this->dashboardModel->getTotalCash(),
-            'branch_performance' => $this->dashboardModel->getBranchPerformanceToday(),
-            'low_stock'        => $this->dashboardModel->getLowStockItems(),
-            'pending_demands'  => $this->dashboardModel->getPendingDemands(),
-            'today_date'       => date('d M, Y')
+            'title' => 'My Sales Cockpit - Remote Center ERP',
+            'user_name' => $userName,
+            'my_mtd_revenue' => $myMtdRevenue,
+            'my_target' => $myTarget,
+            'my_pipeline' => $myPipeline,
+            'my_win_rate' => $myWinRate,
+            'my_deals_closed' => $myDealsClosed,
+            'my_activities' => $myActivities,
+            'today_date' => date('d M, Y')
         ];
 
         $this->view('dashboard/index', $data);

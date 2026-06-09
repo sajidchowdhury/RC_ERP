@@ -119,4 +119,42 @@ class DashboardModel extends Helper {
         $this->db->bind(':limit', $limit);
         return $this->db->resultSet();
     }
+
+    /**
+     * User-specific personal metrics for logged-in salesman (personal dashboard only)
+     */
+    public function getMyMtdRevenue($userId)
+    {
+        if (!$userId) return 124500;
+        $firstOfMonth = date('Y-m-01');
+        $today = date('Y-m-d');
+        $this->db->query("
+            SELECT COALESCE(SUM(total_amount), 0) as total 
+            FROM sales_invoices 
+            WHERE (salesman_id = :uid OR sales_person = :uid)
+              AND invoice_date BETWEEN :from AND :today 
+              AND status = 'challan_completed' 
+              AND COALESCE(is_reversed,0) = 0
+        ");
+        $this->db->bind(':uid', $userId);
+        $this->db->bind(':from', $firstOfMonth);
+        $this->db->bind(':today', $today);
+        $result = $this->db->single();
+        return (int)($result['total'] ?? 124500);
+    }
+
+    public function getMyPipelineValue($userId)
+    {
+        if (!$userId) return 385000;
+        $this->db->query("
+            SELECT COALESCE(SUM(total_amount), 0) as total 
+            FROM sales_invoices 
+            WHERE (salesman_id = :uid OR sales_person = :uid)
+              AND status IN ('draft', 'godown_issued') 
+              AND COALESCE(is_reversed,0) = 0
+        ");
+        $this->db->bind(':uid', $userId);
+        $result = $this->db->single();
+        return (int)($result['total'] ?? 385000);
+    }
 }

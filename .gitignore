@@ -1,2 +1,30 @@
-config/local.php
+# Laravel / PHP
 .env
+.env.backup
+/vendor
+node_modules/
+public/storage
+storage/framework/
+storage/logs/
+
+# Database
+*.sql
+*.sqlite
+*.db
+osudlagb_*.sql
+
+# Cache & Temp
+.continue/
+.bootstrap/
+cache/
+temp/
+backup/
+
+# Logs
+*.log
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
