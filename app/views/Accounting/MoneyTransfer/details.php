@@ -118,31 +118,12 @@ $title = 'Transfer — ' . ($t['transfer_code'] ?? '');
     </div>
     <?php endif; ?>
 
-    <?php if ($journalEntry): ?>
-    <section class="branch-hub-panel mb-3 p-3">
-        <div class="fw-semibold mb-2"><i class="fas fa-book me-1"></i> General ledger (transfer)</div>
-        <p class="small mb-2">
-            <strong><?= htmlspecialchars($journalEntry['entry_no'] ?? '', ENT_QUOTES) ?></strong>
-            <?php if (!empty($journalEntry['is_reversed'])): ?><span class="badge bg-danger">Reversed</span><?php endif; ?>
-        </p>
-        <div class="table-responsive">
-            <table class="table table-sm mt-txn-gl-table mb-0">
-                <thead class="table-light">
-                    <tr><th>Ledger</th><th class="text-end">Debit</th><th class="text-end">Credit</th></tr>
-                </thead>
-                <tbody>
-                <?php foreach ($journalEntry['lines'] ?? [] as $jl): ?>
-                <tr>
-                    <td><?= htmlspecialchars($jl['ledger_name'] ?? '', ENT_QUOTES) ?></td>
-                    <td class="text-end"><?= (float)($jl['debit'] ?? 0) > 0 ? number_format((float)$jl['debit'], 2) : '—' ?></td>
-                    <td class="text-end"><?= (float)($jl['credit'] ?? 0) > 0 ? number_format((float)$jl['credit'], 2) : '—' ?></td>
-                </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    </section>
-    <?php endif; ?>
+    <?php
+    $journal_entry = $journalEntry;
+    $journal_card_title = 'General ledger (transfer)';
+    $journal_card_show_report_link = true;
+    include __DIR__ . '/../../partials/journal_entry_card.php';
+    ?>
 
     <?php if (!empty($settlements)): ?>
     <section class="branch-hub-panel mb-3 p-3">

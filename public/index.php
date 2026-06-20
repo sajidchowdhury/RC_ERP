@@ -16,6 +16,17 @@ require_once '../core/Database.php';
 require_once '../core/BaseController.php';
 require_once '../core/Auth.php';
 require_once '../core/Flash.php';
+require_once '../core/RememberMe.php';
+require_once '../core/PendingLogin.php';
+require_once '../core/InvestigationMode.php';
+
+if (!Auth::isLoggedIn()) {
+    RememberMe::attemptRestore();
+}
+
+if (Auth::isLoggedIn()) {
+    InvestigationMode::syncSessionWithDatabase();
+}
 
 // ==================== ROUTING ====================
 $request_uri = strtok($_SERVER['REQUEST_URI'] ?? '/', '?');
@@ -54,8 +65,13 @@ $routeAliases = [
     'save_fcm_token'     => 'sales/save_fcm_token',
     'sales-guide'        => 'sales/guide',
     'guideline'          => 'sales/guide',
+    'sales-go-live'      => 'sales/go_live_checklist',
+    'go-live-checklist'  => 'sales/go_live_checklist',
     'reports'            => 'Report/index',
     'report'             => 'Report/index',
+    'Accounting/Reconciliation' => 'Reconciliation/index',
+    'gl-reconciliation'  => 'Reconciliation/index',
+    'sales/reconcile'    => 'Reconciliation/index',
     'notifications/unread' => 'notification/unread',     // Fixed
     'notification/unread'=> 'notification/unread',
 ];
@@ -65,9 +81,15 @@ if (isset($routeAliases[$path])) {
     $path = $routeAliases[$path];
 }
 
-// Home: dashboard when logged in, otherwise login
+// Home: dashboard when logged in, otherwise login (or 2FA step)
 if ($path === '' || $path === 'index.php' || $path === 'public') {
-    $path = Auth::isLoggedIn() ? 'dashboard' : 'auth/login';
+    if (Auth::isLoggedIn()) {
+        $path = 'dashboard';
+    } elseif (PendingLogin::isActive()) {
+        $path = 'auth/verify_2fa';
+    } else {
+        $path = 'auth/login';
+    }
 }
 
 $segments = explode('/', $path);
@@ -76,11 +98,30 @@ $controllerName = ucfirst($segments[0] ?? 'Dashboard') . 'Controller';
 $method         = $segments[1] ?? 'index';
 $params         = array_slice($segments, 2);
 
+$isInvestigationScan = ($controllerName === 'InvestigationController' && $method === 'scan');
+
+// Pending 2FA must complete before other protected routes
+if (
+    PendingLogin::isActive()
+    && !Auth::isLoggedIn()
+    && !($controllerName === 'AuthController' && in_array($method, ['verify_2fa', 'logout', 'login'], true))
+    && !$isInvestigationScan
+) {
+    header('Location: ' . BASE_URL . 'auth/verify_2fa');
+    exit;
+}
+
 // ==================== AUTH PROTECTION ====================
 $publicControllers = ['AuthController'];   // Add more public controllers here if needed
 
-if (!in_array($controllerName, $publicControllers)) {
+// investigation/scan sets post_login_redirect and calls requireLogin() itself
+if (!in_array($controllerName, $publicControllers) && !$isInvestigationScan) {
     Auth::requireLogin();
+
+    require_once '../app/services/Security/RouteAccess.php';
+    require_once '../app/services/Security/MenuAccess.php';
+    RouteAccess::require($controllerName, $method);
+    MenuAccess::require($controllerName, $method);
 }
 
 // ==================== ROUTE TO CONTROLLER ====================

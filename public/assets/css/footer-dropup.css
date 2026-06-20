@@ -4,6 +4,28 @@
     height: 30px;
     justify-content: center;
     overflow: visible;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.footer-investigation-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(245, 158, 11, 0.18);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    color: #fbbf24;
+    font-size: 0.72rem;
+    cursor: default;
+}
+
+.footer-investigation-icon:hover {
+    background: rgba(245, 158, 11, 0.28);
+    color: #fcd34d;
 }
 
 .footer-dropup-trigger {

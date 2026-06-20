@@ -4,6 +4,7 @@
 require_once '../core/BaseController.php';
 require_once '../app/models/EmployeeTransactionModel.php';
 require_once '../app/helpers/Helper.php';
+require_once '../app/services/Accounting/JournalPostingService.php';
 require_once '../core/UserAudit.php';
 
 class EmployeeTransactionController extends BaseController {
@@ -18,7 +19,33 @@ class EmployeeTransactionController extends BaseController {
     }
 
     public function index() {
-        $branchId = Helper::sessionBranchId() ?: (int)($_SESSION['branch_id'] ?? 0);
+        $showReversed = isset($_GET['reversed']) && $_GET['reversed'] == '1';
+        $filters = $this->resolveIndexFilters($showReversed);
+
+        $listBranchId = $this->resolveListBranchId();
+        $transactions = $this->model->getFilteredTransactions($filters, $listBranchId);
+
+        foreach ($transactions as &$row) {
+            $row['can_reverse'] = !$showReversed && $this->model->canUserReverseTransaction($row);
+        }
+        unset($row);
+
+        $this->view('Accounting/employee/index', [
+            'title'        => $showReversed ? 'Reversed employee transactions' : 'Employee transactions',
+            'transactions' => $transactions,
+            'branch_name'  => $_SESSION['branch_name'] ?? 'Branch',
+            'filters'      => $filters,
+            'stats'        => $this->model->getEmployeeTransactionIndexStats($listBranchId),
+            'employees'    => $this->model->getEmployees(),
+            'showReversed' => $showReversed,
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveIndexFilters(bool $showReversed): array
+    {
         $today = date('Y-m-d');
 
         if (!isset($_GET['date_from']) && !isset($_GET['date_to'])) {
@@ -33,40 +60,34 @@ class EmployeeTransactionController extends BaseController {
             }
         }
 
-        $filters = [
+        return [
             'date_from'        => $dateFrom,
             'date_to'          => $dateTo,
             'transaction_type' => $_GET['transaction_type'] ?? 'all',
-            'status'           => $_GET['status'] ?? 'all',
+            'status'           => $showReversed ? 'reversed' : ($_GET['status'] ?? 'all'),
             'payment_mode'     => $_GET['payment_mode'] ?? 'all',
             'employee_id'      => $_GET['employee_id'] ?? null,
         ];
+    }
 
-        $listBranchId = ($this->model->canOverrideBranch() && $branchId <= 0) ? null : ($branchId ?: null);
-        $transactions = $this->model->getFilteredTransactions($filters, $listBranchId);
+    private function resolveListBranchId(): ?int
+    {
+        $branchId = Helper::sessionBranchId() ?: (int)($_SESSION['branch_id'] ?? 0);
 
-        foreach ($transactions as &$row) {
-            $row['can_reverse'] = $this->model->canUserReverseTransaction($row);
-        }
-        unset($row);
-
-        $this->view('Accounting/employee/index', [
-            'title'        => 'Employee transactions',
-            'transactions' => $transactions,
-            'branch_name'  => $_SESSION['branch_name'] ?? 'Branch',
-            'filters'      => $filters,
-            'stats'        => $this->model->getEmployeeTransactionIndexStats($listBranchId),
-            'employees'    => $this->model->getEmployees(),
-        ]);
+        return ($this->model->canOverrideBranch() && $branchId <= 0) ? null : ($branchId ?: null);
     }
 
     public function create() {
+        $posting = new JournalPostingService();
+
         $this->view('Accounting/employee/create', [
-            'title'       => 'New employee transaction',
-            'employees'   => $this->model->getEmployees(),
-            'banks'       => $this->model->getBanks(),
-            'today'       => date('Y-m-d'),
-            'branch_name' => $_SESSION['branch_name'] ?? 'Branch',
+            'title'                    => 'New employee transaction',
+            'employees'                => $this->model->getEmployees(),
+            'banks'                    => $this->model->getBanks(),
+            'today'                    => date('Y-m-d'),
+            'branch_name'              => $_SESSION['branch_name'] ?? 'Branch',
+            'gl_preview_labels'        => $posting->getEmployeeTransactionGlPreviewLabels(),
+            'employee_payable_status'  => $posting->getEmployeePayableLedgerStatus(),
         ]);
     }
 
@@ -84,6 +105,7 @@ class EmployeeTransactionController extends BaseController {
                 $tid = (int)($result['transaction_id'] ?? $result['payment_id'] ?? 0);
                 $this->userAudit->log($_SESSION['user_id'] ?? 0, 'employee_transaction_created', $tid, [
                     'transaction_code' => $result['transaction_code'] ?? '',
+                    'payment_code'     => $result['transaction_code'] ?? '',
                     'transaction_type' => $_POST['transaction_type'] ?? '',
                     'amount'           => $_POST['amount'] ?? 0,
                     'employee_id'      => $_POST['employee_id'] ?? 0,
@@ -191,6 +213,13 @@ class EmployeeTransactionController extends BaseController {
             'journal_entry' => $this->model->getJournalEntryForTransaction($tid),
             'employee_due'  => $this->model->getEmployeeDue((int)$transaction['employee_id']),
             'can_reverse'   => $this->model->canUserReverseTransaction($transaction),
+        ]);
+    }
+
+    public function audit() {
+        $this->view('Accounting/employee/audit', [
+            'title' => 'Employee Transaction Audit Logs',
+            'logs'  => $this->userAudit->getRecentLogs(300, 'employee_transaction_'),
         ]);
     }
 }

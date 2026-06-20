@@ -45,13 +45,15 @@ class WarehouseTransferModel extends Helper {
 
     public function getProductStockAndRate(int $product_id, int $warehouse_id): array
     {
-        $stock = $this->getWarehouseQty($product_id, $warehouse_id);
+        $balance = $this->Get_Product_Stock_Balance($product_id, null, $warehouse_id);
         $rate  = $warehouse_id > 0 && $product_id > 0
             ? round($this->stockTransaction->getWarehouseAvgCost($warehouse_id, $product_id), 2)
             : 0.0;
 
         return [
-            'available_qty' => $stock,
+            'available_qty' => (float)($balance['available'] ?? 0),
+            'physical_qty'  => (float)($balance['physical'] ?? 0),
+            'pipeline_qty'  => (float)($balance['pending_out'] ?? 0),
             'price'         => $rate,
             'rate'          => $rate,
         ];
@@ -59,16 +61,7 @@ class WarehouseTransferModel extends Helper {
 
     private function getWarehouseQty(int $product_id, int $warehouse_id): float
     {
-        $this->db->query('
-            SELECT COALESCE(qty, 0) AS available_qty
-            FROM warehouse_stock
-            WHERE product_id = :pid AND warehouse_id = :wid
-        ');
-        $this->db->bind(':pid', $product_id);
-        $this->db->bind(':wid', $warehouse_id);
-        $row = $this->db->single();
-
-        return (float)($row['available_qty'] ?? 0);
+        return $this->Get_Warehouse_Available_Stock($product_id, $warehouse_id);
     }
 
     private function resolveWarehouseBranches(int $fromWarehouseId, int $toWarehouseId): array
@@ -151,6 +144,14 @@ class WarehouseTransferModel extends Helper {
             if ($lineItems === []) {
                 throw new Exception('Add at least one product line');
             }
+
+            $this->Assert_Warehouse_Lines_Available(array_map(static function (array $item) use ($fromWarehouseId): array {
+                return [
+                    'product_id'   => (int)$item['product_id'],
+                    'warehouse_id' => $fromWarehouseId,
+                    'qty'          => (float)$item['qty'],
+                ];
+            }, $lineItems));
 
             $transfer_code = 'WT-' . date('Ymd') . '-' . str_pad((string)random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
             $transferDate = $post['transfer_date'] ?? date('Y-m-d');

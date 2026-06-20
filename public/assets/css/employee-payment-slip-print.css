@@ -1,25 +1,2 @@
-.customer-payment-slip-body.emp-payment-slip-body .cps-banner {
-    border-color: #ddd6fe;
-    background: linear-gradient(135deg, #f5f3ff, #ede9fe);
-}
-
-.customer-payment-slip-body.emp-payment-slip-body .cps-type-badge.advance {
-    background: #ede9fe;
-    color: #6d28d9;
-}
-
-.customer-payment-slip-body.emp-payment-slip-body .cps-type-badge.loan {
-    background: #fef3c7;
-    color: #b45309;
-}
-
-.customer-payment-slip-body.emp-payment-slip-body .cps-type-badge.salary {
-    background: #dbeafe;
-    color: #1d4ed8;
-}
-
-.customer-payment-slip-body.emp-payment-slip-body .cps-type-badge.repayment,
-.customer-payment-slip-body.emp-payment-slip-body .cps-type-badge.deduction {
-    background: #d1fae5;
-    color: #047857;
-}
+/* @deprecated — merged into entity-voucher-slip-print.css */
+@import url('entity-voucher-slip-print.css');

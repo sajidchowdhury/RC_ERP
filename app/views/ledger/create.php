@@ -1,7 +1,7 @@
 <?php
 ob_start();
 $title = $title ?? 'New ledger account';
-$ledgers = $ledgers ?? [];
+$parentOptions = $parentOptions ?? [];
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/ledger-theme.css">
@@ -26,7 +26,7 @@ $ledgers = $ledgers ?? [];
             <!-- ===================================================== -->
             <!-- CREATIVE HELP FOR NON-ACCOUNTANTS -->
             <!-- ===================================================== -->
-            <div class="card shadow-sm border-0 mb-4 branch-form-section" style="border-left: 4px solid #4f46e5 !important;">
+            <div id="ledger-scenario-helper" class="card shadow-sm border-0 mb-4 branch-form-section" style="border-left: 4px solid #4f46e5 !important;">
                 <div class="card-header bg-primary text-white py-2">
                     <h6 class="mb-0 fw-semibold">
                         <i class="fas fa-magic me-2"></i> 
@@ -49,8 +49,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 2 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('supplier_payable', this)"
-
+                                 onclick="applyScenario('supplier_payable', this)">
                                 <i class="fas fa-truck-loading fa-2x text-warning mb-1"></i>
                                 <div class="small fw-medium">I have to pay my suppliers</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Supplier Payable</div>
@@ -59,8 +58,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 3 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('cash_bank', this)"
-
+                                 onclick="applyScenario('cash_bank', this)">
                                 <i class="fas fa-wallet fa-2x text-success mb-1"></i>
                                 <div class="small fw-medium">Cash in hand or bank balance</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Cash &amp; Bank</div>
@@ -69,8 +67,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 4 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('inventory', this)"
-
+                                 onclick="applyScenario('inventory', this)">
                                 <i class="fas fa-boxes fa-2x text-info mb-1"></i>
                                 <div class="small fw-medium">Stock lying in godown</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Inventory / Stock</div>
@@ -79,8 +76,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 5 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('sales_revenue', this)"
-
+                                 onclick="applyScenario('sales_revenue', this)">
                                 <i class="fas fa-chart-line fa-2x text-success mb-1"></i>
                                 <div class="small fw-medium">Sales I made to customers</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Sales Revenue</div>
@@ -89,8 +85,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 6 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('payroll_expense', this)"
-
+                                 onclick="applyScenario('payroll_expense', this)">
                                 <i class="fas fa-users fa-2x text-danger mb-1"></i>
                                 <div class="small fw-medium">Salaries of staff &amp; salesmen</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Payroll Expense</div>
@@ -99,8 +94,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 7 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('transport_expense', this)"
-
+                                 onclick="applyScenario('transport_expense', this)">
                                 <i class="fas fa-truck fa-2x text-primary mb-1"></i>
                                 <div class="small fw-medium">Transportation &amp; delivery charges</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Operating Expense</div>
@@ -109,8 +103,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 8 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('fixed_asset', this)"
-
+                                 onclick="applyScenario('fixed_asset', this)">
                                 <i class="fas fa-car fa-2x text-dark mb-1"></i>
                                 <div class="small fw-medium">New delivery vehicle or machine</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Fixed Asset</div>
@@ -119,8 +112,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 9 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('godown_rent', this)"
-
+                                 onclick="applyScenario('godown_rent', this)">
                                 <i class="fas fa-warehouse fa-2x text-secondary mb-1"></i>
                                 <div class="small fw-medium">Godown rent, electricity, utilities</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Operating Expense</div>
@@ -129,8 +121,7 @@ $ledgers = $ledgers ?? [];
                         <!-- 10 -->
                         <div class="col-6 col-md-4 col-lg-3">
                             <div class="scenario-card p-2 border rounded text-center h-100" 
-                                 onclick="applyScenario('cogs', this)"
-
+                                 onclick="applyScenario('cogs', this)">
                                 <i class="fas fa-dolly fa-2x text-warning mb-1"></i>
                                 <div class="small fw-medium">Cost of the goods I sold</div>
                                 <div class="text-muted" style="font-size: 0.7rem;">Cost of Goods Sold</div>
@@ -197,60 +188,10 @@ It tells our accounting engine exactly how to use this account in reports and au
                                         </label>
                                         <select name="ledger_nature" class="form-select" required>
                                             <option value="">— Select Nature —</option>
-
-                                            <!-- Control & Sub-Ledger -->
-                                            <optgroup label="Control & Sub-Ledger Accounts">
-                                                <option value="cash_bank">Cash & Bank</option>
-                                                <option value="customer_receivable">Customer Receivable (AR)</option>
-                                                <option value="supplier_payable">Supplier Payable (AP)</option>
-                                                <option value="employee_payable">Employee Payable / Receivable</option>
-                                            </optgroup>
-
-                                            <!-- Revenue -->
-                                            <optgroup label="Revenue">
-                                                <option value="sales_revenue">Sales Revenue</option>
-                                                <option value="other_income">Other Income</option>
-                                                <option value="sales_return">Sales Returns & Allowances</option>
-                                            </optgroup>
-
-                                            <!-- Cost of Sales -->
-                                            <optgroup label="Cost of Sales">
-                                                <option value="inventory">Inventory / Stock</option>
-                                                <option value="cogs">Cost of Goods Sold (COGS)</option>
-                                            </optgroup>
-
-                                            <!-- Expenses -->
-                                            <optgroup label="Expenses">
-                                                <option value="operating_expense">Operating / Administrative Expense</option>
-                                                <option value="payroll_expense">Payroll & Salaries</option>
-                                                <option value="depreciation">Depreciation & Amortization</option>
-                                                <option value="financial_expense">Financial Expense (Interest, Bank Charges)</option>
-                                            </optgroup>
-
-                                            <!-- Tax -->
-                                            <optgroup label="Tax & Statutory">
-                                                <option value="tax_payable">Tax Payable (VAT/GST Output)</option>
-                                                <option value="tax_receivable">Tax Receivable (Input VAT)</option>
-                                            </optgroup>
-
-                                            <!-- Balance Sheet Specific -->
-                                            <optgroup label="Balance Sheet Specific">
-                                                <option value="fixed_asset">Fixed Assets (PPE)</option>
-                                                <option value="accumulated_depreciation">Accumulated Depreciation</option>
-                                                <option value="prepaid_expense">Prepaid Expenses</option>
-                                                <option value="accrued_expense">Accrued Expenses / Liabilities</option>
-                                                <option value="long_term_liability">Long Term Liability</option>
-                                                <option value="owner_equity">Owner's Capital / Equity</option>
-                                                <option value="retained_earnings">Retained Earnings</option>
-                                                <option value="drawings">Owner's Drawings</option>
-                                            </optgroup>
-
-                                            <!-- General -->
-                                            <optgroup label="General">
-                                                <option value="other_asset">Other Asset</option>
-                                                <option value="other_liability">Other Liability</option>
-                                                <option value="manual_adjustment">Manual Journal Adjustment</option>
-                                            </optgroup>
+                                            <?php
+                                            $selectedNature = '';
+                                            require __DIR__ . '/_nature_options.php';
+                                            ?>
                                         </select>
                                         <div class="form-text">Tells the accounting engine how this ledger should behave in automatic postings and reports.</div>
                                     </div>
@@ -316,12 +257,10 @@ It tells our accounting engine exactly how to use this account in reports and au
                             <div class="col-md-6">
                                 <label class="form-label fw-medium">Parent Ledger</label>
                                 <select name="parent_id" class="form-select">
-                                    <option value="0">— None (Top Level) —</option>
-                                    <?php foreach ($ledgers as $l): ?>
-                                        <?php if ($l['parent_id'] == 0): ?>
-                                            <option value="<?= $l['id'] ?>"><?= htmlspecialchars($l['ledger_name']) ?></option>
-                                        <?php endif; ?>
-                                    <?php endforeach; ?>
+                                    <?php
+                                    $selectedParentId = 0;
+                                    require __DIR__ . '/_parent_options.php';
+                                    ?>
                                 </select>
                             </div>
 
@@ -332,9 +271,10 @@ It tells our accounting engine exactly how to use this account in reports and au
 
                             <div class="col-md-3">
                                 <label class="form-label fw-medium">Status</label>
+                                <input type="hidden" name="is_active" value="0">
                                 <div class="form-check mt-2">
-                                    <input class="form-check-input" type="checkbox" name="is_active" value="1" checked>
-                                    <label class="form-check-label">Active</label>
+                                    <input class="form-check-input" type="checkbox" name="is_active" value="1" id="create_is_active" checked>
+                                    <label class="form-check-label" for="create_is_active">Active</label>
                                 </div>
                             </div>
 
@@ -649,9 +589,11 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
 
         // Insert after the helper card
-        const helperCard = document.querySelector('.card.border-primary');
+        const helperCard = document.getElementById('ledger-scenario-helper');
         if (helperCard && helperCard.parentNode) {
             helperCard.parentNode.insertBefore(explanationBox, helperCard.nextSibling);
+        } else {
+            document.getElementById('ledgerCreateForm')?.prepend(explanationBox);
         }
 
         setTimeout(() => {

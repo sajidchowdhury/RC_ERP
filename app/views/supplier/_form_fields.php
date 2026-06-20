@@ -3,9 +3,11 @@
  * Shared supplier form fields.
  * @var array $supplier
  * @var bool $isEdit
+ * @var bool $canDeactivate
  */
 $supplier = $supplier ?? [];
 $isEdit = !empty($isEdit);
+$canDeactivate = $canDeactivate ?? true;
 $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 ?>
 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
@@ -78,8 +80,11 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         </div>
         <div class="status-option">
             <input type="radio" name="is_active" id="supInactive" value="0"
-                   <?= empty($supplier['is_active']) ? 'checked' : '' ?>>
-            <label for="supInactive" class="inactive-opt"><i class="fas fa-circle-xmark"></i> Inactive</label>
+                   <?= empty($supplier['is_active']) ? 'checked' : '' ?>
+                   <?= ($canDeactivate || empty($supplier['is_active'])) ? '' : 'disabled' ?>>
+            <label for="supInactive" class="inactive-opt<?= (!$canDeactivate && !empty($supplier['is_active'])) ? ' opacity-50' : '' ?>">
+                <i class="fas fa-circle-xmark"></i> Inactive
+            </label>
         </div>
     </div>
 </div>

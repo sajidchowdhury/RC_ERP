@@ -2,7 +2,7 @@
 $damage = $damage ?? [];
 $items = $items ?? [];
 $movements = $movements ?? [];
-$journalEntry = $journal_entry ?? null;
+$journal_blocks = $journal_blocks ?? [];
 $damageAudit = $damage_audit ?? [];
 $auditItems = $damageAudit['items'] ?? [];
 $auditSummary = $damageAudit['summary'] ?? [];
@@ -27,6 +27,7 @@ ob_start();
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/purchase-audit-checklist.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/stock-take.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/damage.css">
+<link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 
 <div class="purch-index-app st-take-app dmg-app container-fluid py-2">
     <header class="purch-index-hero dmg-hero">
@@ -58,6 +59,18 @@ ob_start();
             <?php endif; ?>
         </span>
         <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if (!empty($damage['sales_return_id'])): ?>
+    <div class="alert alert-info mb-3 py-2">
+        <i class="fas fa-link me-1"></i>
+        Linked to sales return
+        <a href="<?= BASE_URL ?>SalesReturn/slip/<?= (int)$damage['sales_return_id'] ?>" class="alert-link fw-semibold" target="_blank" rel="noopener">
+            <?= htmlspecialchars($damage['sales_return_code'] ?? ('#' . (int)$damage['sales_return_id']), ENT_QUOTES) ?>
+        </a>
+        — auto write-off when warehouse confirmed damaged lines.
+        <a href="<?= BASE_URL ?>Damage?sales_return_id=<?= (int)$damage['sales_return_id'] ?>" class="btn btn-sm btn-outline-primary ms-2">All damage for this return</a>
     </div>
     <?php endif; ?>
 
@@ -147,29 +160,7 @@ ob_start();
         </div>
     </section>
 
-    <?php if ($journalEntry): ?>
-    <section class="st-section-card mb-3">
-        <div class="st-section-head"><i class="fas fa-book me-1"></i> GL — Dr shrinkage / Cr inventory</div>
-        <div class="p-3">
-            <p class="small mb-2">
-                <strong><?= htmlspecialchars($journalEntry['entry_no'] ?? '', ENT_QUOTES) ?></strong>
-                <?php if (!empty($journalEntry['is_reversed'])): ?><span class="badge bg-danger">Reversed</span><?php endif; ?>
-            </p>
-            <table class="table table-sm mb-0">
-                <thead class="table-light"><tr><th>Ledger</th><th class="text-end">Dr</th><th class="text-end">Cr</th></tr></thead>
-                <tbody>
-                <?php foreach ($journalEntry['lines'] ?? [] as $jl): ?>
-                <tr>
-                    <td class="small"><?= htmlspecialchars($jl['ledger_name'] ?? '', ENT_QUOTES) ?></td>
-                    <td class="text-end"><?= (float)($jl['debit'] ?? 0) > 0 ? number_format((float)$jl['debit'], 2) : '—' ?></td>
-                    <td class="text-end"><?= (float)($jl['credit'] ?? 0) > 0 ? number_format((float)$jl['credit'], 2) : '—' ?></td>
-                </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    </section>
-    <?php endif; ?>
+    <?php include __DIR__ . '/../partials/sales_gl_journal_blocks.php'; ?>
 
     <section class="st-section-card">
         <div class="st-section-head">Stock movements</div>

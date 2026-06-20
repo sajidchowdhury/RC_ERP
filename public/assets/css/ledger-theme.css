@@ -119,3 +119,17 @@
     padding: 1rem 1.25rem;
     margin-bottom: 1rem;
 }
+
+.ledger-tree-indent {
+    display: inline-block;
+    border-left: 2px solid #c7d2fe;
+    margin-right: 0.25rem;
+}
+
+.ledger-show-meta dt {
+    font-weight: 500;
+}
+
+.ledger-show-meta dd {
+    margin-bottom: 0.35rem;
+}

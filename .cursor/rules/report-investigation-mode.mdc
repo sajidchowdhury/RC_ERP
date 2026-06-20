@@ -1,0 +1,33 @@
+---
+description: Investigation mode date rules when creating or editing ERP reports
+globs: app/controllers/ReportController.php,app/models/Reports/**,app/views/report/**,app/views/Report/**,app/views/sales/RevenueOverview.php,app/views/sales/SalesFunnelPipeline.php,app/views/sales/CustomerPerformance.php,app/helpers/ReportsCatalog.php
+alwaysApply: false
+---
+
+# Report development — investigation mode
+
+Before changing reports, read `docs/REPORT_DEVELOPMENT.md`.
+
+## Rule (mandatory)
+
+When **investigation mode is ON**, all report date filters must be capped to the **current fiscal year** (default Jul 1 – Jun 30, via `InvestigationMode`). Applies to **every role** including superadmin. Non-report features are unchanged.
+
+## Implementation
+
+In `ReportController`, always use:
+
+- `$this->resolveReportDates($from, $to, $defaultFrom, $defaultTo)` for ranges
+- `$this->resolveAsOfDate($asOf, $default)` for as-of dates
+- `$this->attachReportPeriodMeta($data, $range)` for view notice
+
+Never read raw `from_date` / `to_date` from request without clamping.
+
+Other controllers: call `InvestigationMode::clampReportDates()` / `clampAsOfDate()` — do not duplicate fiscal logic.
+
+Report models: accept pre-clamped dates from controller only.
+
+## Do not
+
+- Add read-only POST guards or branch scoping for investigation
+- Bypass date clamping in export/AJAX endpoints
+- Implement fiscal-year math outside `core/InvestigationMode.php`

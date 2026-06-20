@@ -468,28 +468,13 @@ public function getCustomerDue($customer_id) {
     }
 
     /**
-     * Get all customer transactions for listing
+     * Build WHERE clause fragments for payment list queries.
+     *
+     * @return array{0: array<int, string>, 1: array<string, mixed>}
      */
-    public function getFilteredTransactions(array $filters = [], ?int $branchId = null): array
+    private function buildPaymentListFilters(array $filters, ?int $branchId): array
     {
-        $sql = "
-            SELECT
-                cp.*,
-                c.shop_name,
-                c.mobile,
-                b.bank_name,
-                u.username AS created_by_name,
-                e.name AS collected_by_name,
-                br.branch_name
-            FROM customer_payments cp
-            JOIN customers c ON cp.customer_id = c.id
-            LEFT JOIN banks b ON cp.bank_id = b.id
-            LEFT JOIN users u ON cp.created_by = u.id
-            LEFT JOIN employees e ON cp.collected_by = e.id
-            LEFT JOIN branches br ON cp.branch_id = br.id
-        ";
-
-        $where    = [];
+        $where = [];
         $bindings = [];
 
         if ($branchId > 0) {
@@ -535,13 +520,161 @@ public function getCustomerDue($customer_id) {
 
         if (!empty($filters['payment_mode']) && $filters['payment_mode'] !== 'all') {
             $where[] = 'LOWER(cp.payment_mode) = :pmode';
-            $bindings[':pmode'] = strtolower($filters['payment_mode']);
+            $bindings[':pmode'] = strtolower((string)$filters['payment_mode']);
         }
 
         if (!empty($filters['customer_id'])) {
             $where[] = 'cp.customer_id = :cid';
             $bindings[':cid'] = (int)$filters['customer_id'];
         }
+
+        return [$where, $bindings];
+    }
+
+    private function paymentListFromSql(): string
+    {
+        return "
+            FROM customer_payments cp
+            JOIN customers c ON cp.customer_id = c.id
+            LEFT JOIN banks b ON cp.bank_id = b.id
+            LEFT JOIN users u ON cp.created_by = u.id
+            LEFT JOIN employees e ON cp.collected_by = e.id
+            LEFT JOIN branches br ON cp.branch_id = br.id
+        ";
+    }
+
+    /**
+     * Server-side DataTables for customer payment index.
+     */
+    public function getPaymentsForDataTable(array $params, array $filters, ?int $branchId): array
+    {
+        $start       = (int)($params['start'] ?? 0);
+        $length      = (int)($params['length'] ?? 25);
+        if ($length <= 0 || $length > 100) {
+            $length = 25;
+        }
+        $searchValue = trim($params['search']['value'] ?? '');
+        $reversedMode = $params['reversedMode'] ?? '';
+        $orderColumn = (int)($params['order'][0]['column'] ?? 0);
+        $orderDir    = strtolower($params['order'][0]['dir'] ?? 'desc') === 'asc' ? 'ASC' : 'DESC';
+
+        $columns = [
+            'cp.payment_date',
+            'cp.payment_code',
+            'c.shop_name',
+            'cp.transaction_type',
+            'cp.amount',
+            'cp.payment_mode',
+            'e.name',
+            'cp.is_reversed',
+        ];
+
+        $baseQuery = $this->paymentListFromSql();
+
+        [$where, $bindParams] = $this->buildPaymentListFilters($filters, $branchId);
+
+        if ($reversedMode === 'only_reversed') {
+            $where[] = 'cp.is_reversed = 1';
+        }
+
+        $branchOnlyWhere = [];
+        $branchOnlyBind = [];
+        if ($branchId > 0) {
+            $branchOnlyWhere[] = 'cp.branch_id = :branch_id';
+            $branchOnlyBind[':branch_id'] = $branchId;
+        } elseif (!$this->canOverrideBranch() && self::sessionBranchId() > 0) {
+            $branchOnlyWhere[] = 'cp.branch_id = :branch_id';
+            $branchOnlyBind[':branch_id'] = self::sessionBranchId();
+        }
+        $branchOnlySql = $branchOnlyWhere ? 'WHERE ' . implode(' AND ', $branchOnlyWhere) : '';
+
+        if ($searchValue !== '') {
+            $where[] = '(cp.payment_code LIKE :search
+                      OR c.shop_name LIKE :search
+                      OR c.customer_name LIKE :search
+                      OR c.mobile LIKE :search)';
+            $bindParams[':search'] = '%' . $searchValue . '%';
+        }
+
+        $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        $totalQuery = "SELECT COUNT(cp.id) AS total {$baseQuery} {$branchOnlySql}";
+        $this->db->query($totalQuery);
+        foreach ($branchOnlyBind as $key => $val) {
+            $this->db->bind($key, $val);
+        }
+        $recordsTotal = (int)($this->db->single()['total'] ?? 0);
+
+        $filteredQuery = "SELECT COUNT(cp.id) AS total {$baseQuery} {$whereSql}";
+        $this->db->query($filteredQuery);
+        foreach ($bindParams as $key => $val) {
+            $this->db->bind($key, $val);
+        }
+        $recordsFiltered = (int)($this->db->single()['total'] ?? 0);
+
+        $orderBy = $columns[$orderColumn] ?? 'cp.payment_date';
+        $dataQuery = "
+            SELECT
+                cp.id,
+                cp.payment_date,
+                cp.payment_code,
+                cp.customer_id,
+                cp.transaction_type,
+                cp.amount,
+                cp.payment_mode,
+                cp.is_reversed,
+                cp.branch_id,
+                c.shop_name,
+                c.mobile,
+                e.name AS collected_by_name
+            {$baseQuery}
+            {$whereSql}
+            ORDER BY {$orderBy} {$orderDir}, cp.id DESC
+            LIMIT {$start}, {$length}
+        ";
+
+        $this->db->query($dataQuery);
+        foreach ($bindParams as $key => $val) {
+            $this->db->bind($key, $val);
+        }
+        $data = $this->db->resultSet() ?: [];
+
+        foreach ($data as &$row) {
+            $row['can_reverse'] = $this->canUserReversePayment($row) ? 1 : 0;
+        }
+        unset($row);
+
+        return [
+            'draw'            => (int)($params['draw'] ?? 1),
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $data,
+        ];
+    }
+
+    /**
+     * Get all customer transactions for listing
+     */
+    public function getFilteredTransactions(array $filters = [], ?int $branchId = null): array
+    {
+        $sql = "
+            SELECT
+                cp.*,
+                c.shop_name,
+                c.mobile,
+                b.bank_name,
+                u.username AS created_by_name,
+                e.name AS collected_by_name,
+                br.branch_name
+            FROM customer_payments cp
+            JOIN customers c ON cp.customer_id = c.id
+            LEFT JOIN banks b ON cp.bank_id = b.id
+            LEFT JOIN users u ON cp.created_by = u.id
+            LEFT JOIN employees e ON cp.collected_by = e.id
+            LEFT JOIN branches br ON cp.branch_id = br.id
+        ";
+
+        [$where, $bindings] = $this->buildPaymentListFilters($filters, $branchId);
 
         if (!empty($where)) {
             $sql .= ' WHERE ' . implode(' AND ', $where);

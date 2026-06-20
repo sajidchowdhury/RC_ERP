@@ -22,12 +22,16 @@ class CustomerModel extends Helper{
         return $this->Get_Customer_By_Id($id);
     }
 
-    // Auto generate customer code
-    private function generateCustomerCode() {
-        $this->db->query("SELECT COUNT(*) as total FROM customers");
+    // Auto generate customer code (sequential from latest code, not row count)
+    private function generateCustomerCode(): string
+    {
+        $this->db->query("SELECT customer_code FROM customers ORDER BY id DESC LIMIT 1");
         $row = $this->db->single();
-        $next = str_pad($row['total'] + 1, 4, '0', STR_PAD_LEFT);
-        return "C-" . $next;
+        $nextNum = 1;
+        if (!empty($row['customer_code']) && preg_match('/C-(\d+)/', (string)$row['customer_code'], $m)) {
+            $nextNum = (int)$m[1] + 1;
+        }
+        return 'C-' . str_pad((string)$nextNum, 4, '0', STR_PAD_LEFT);
     }
 
     // Check mobile uniqueness
@@ -42,11 +46,89 @@ class CustomerModel extends Helper{
         return $this->db->single() ? true : false;
     }
 
-    public function createCustomer($data) {
-        if ($this->mobileExists($data['mobile'])) {
-            return ['status' => 'error', 'message' => 'This mobile number already exists!'];
+    /**
+     * Validate customer form input for create/update.
+     *
+     * @return array{ok: bool, error?: string, data?: array<string, mixed>}
+     */
+    public function validateCustomerPayload(array $input, ?int $excludeId = null): array
+    {
+        $shopName = trim((string)($input['shop_name'] ?? ''));
+        $customerName = trim((string)($input['customer_name'] ?? ''));
+        $mobile = trim((string)($input['mobile'] ?? ''));
+        $address = trim((string)($input['address'] ?? ''));
+        $salesPersonRaw = $input['sales_person_id'] ?? '';
+        $salesPersonId = ($salesPersonRaw !== '' && $salesPersonRaw !== null) ? (int)$salesPersonRaw : null;
+        $creditLimit = round((float)($input['credit_limit'] ?? 0), 2);
+        if ($creditLimit < 0) {
+            $creditLimit = 0.0;
         }
 
+        if ($shopName === '') {
+            return ['ok' => false, 'error' => 'Shop name is required.'];
+        }
+        if ($mobile === '') {
+            return ['ok' => false, 'error' => 'Mobile number is required.'];
+        }
+        if ($this->mobileExists($mobile, $excludeId)) {
+            return ['ok' => false, 'error' => 'This mobile number already exists!'];
+        }
+
+        $payload = [
+            'shop_name'       => $shopName,
+            'customer_name'   => $customerName,
+            'mobile'          => $mobile,
+            'address'         => $address,
+            'sales_person_id' => $salesPersonId,
+            'credit_limit'    => $creditLimit,
+        ];
+
+        if ($excludeId !== null) {
+            $existing = $this->getCustomerById($excludeId);
+            if (!$existing) {
+                return ['ok' => false, 'error' => 'Customer not found.'];
+            }
+
+            $newActive = (int)($input['is_active'] ?? 1) === 1 ? 1 : 0;
+            $wasActive = !empty($existing['is_active']);
+
+            if ($wasActive && !$newActive) {
+                $safety = $this->getDeactivationSafetyStatus($excludeId);
+                if (!$safety['can_deactivate']) {
+                    return ['ok' => false, 'error' => $this->getDeactivationMessage($excludeId)];
+                }
+            }
+
+            $payload['is_active'] = $newActive;
+        }
+
+        return ['ok' => true, 'data' => $payload];
+    }
+
+    public function getDeactivationMessage(int $customerId): string
+    {
+        $safety = $this->getDeactivationSafetyStatus($customerId);
+        $msg = 'Cannot deactivate this customer.';
+        if (!empty($safety['has_outstanding'])) {
+            $msg .= ' Outstanding balance: ' . number_format((float)$safety['outstanding_balance'], 2);
+        }
+        if (!empty($safety['has_sales_history'])) {
+            $msg .= (!empty($safety['has_outstanding']) ? '. ' : ' ')
+                . 'Has ' . number_format((int)$safety['sales_count']) . ' sales record(s).';
+        }
+        $msg .= ' Clear dues before changing status.';
+
+        return $msg;
+    }
+
+    public function createCustomer(array $data): array
+    {
+        $validated = $this->validateCustomerPayload($data);
+        if (!$validated['ok']) {
+            return ['status' => 'error', 'message' => $validated['error']];
+        }
+
+        $payload = $validated['data'];
         $customer_code = $this->generateCustomerCode();
 
         $this->db->query("
@@ -59,24 +141,35 @@ class CustomerModel extends Helper{
         ");
 
         $this->db->bind(':customer_code', $customer_code);
-        $this->db->bind(':shop_name', trim($data['shop_name']));
-        $this->db->bind(':customer_name', trim($data['customer_name'] ?? ''));
-        $this->db->bind(':mobile', trim($data['mobile']));
-        $this->db->bind(':address', trim($data['address'] ?? ''));
-        $this->db->bind(':sales_person_id', $data['sales_person_id'] ?? null);
-        $this->db->bind(':credit_limit', $data['credit_limit'] ?? 0);
+        $this->db->bind(':shop_name', $payload['shop_name']);
+        $this->db->bind(':customer_name', $payload['customer_name']);
+        $this->db->bind(':mobile', $payload['mobile']);
+        $this->db->bind(':address', $payload['address']);
+        $this->db->bind(':sales_person_id', $payload['sales_person_id']);
+        $this->db->bind(':credit_limit', $payload['credit_limit']);
         $this->db->bind(':created_by', $_SESSION['user_id'] ?? 1);
 
         if ($this->db->execute()) {
-            return ['status' => 'success', 'message' => 'Customer created successfully!'];
+            return [
+                'status'  => 'success',
+                'message' => 'Customer created successfully!',
+                'id'      => (int)$this->db->lastInsertId(),
+                'customer_code' => $customer_code,
+            ];
         }
+
         return ['status' => 'error', 'message' => 'Failed to create customer!'];
     }
 
-    public function updateCustomer($id, $data) {
-        if ($this->mobileExists($data['mobile'], $id)) {
-            return ['status' => 'error', 'message' => 'This mobile number already exists!'];
+    public function updateCustomer($id, array $data): array
+    {
+        $customerId = (int)$id;
+        $validated = $this->validateCustomerPayload($data, $customerId);
+        if (!$validated['ok']) {
+            return ['status' => 'error', 'message' => $validated['error']];
         }
+
+        $payload = $validated['data'];
 
         $this->db->query("
             UPDATE customers SET 
@@ -91,18 +184,19 @@ class CustomerModel extends Helper{
             WHERE id = :id
         ");
 
-        $this->db->bind(':shop_name', trim($data['shop_name']));
-        $this->db->bind(':customer_name', trim($data['customer_name'] ?? ''));
-        $this->db->bind(':mobile', trim($data['mobile']));
-        $this->db->bind(':address', trim($data['address'] ?? ''));
-        $this->db->bind(':sales_person_id', $data['sales_person_id'] ?? null);
-        $this->db->bind(':credit_limit', $data['credit_limit'] ?? 0);
-        $this->db->bind(':is_active', $data['is_active'] ?? 1);
-        $this->db->bind(':id', $id);
+        $this->db->bind(':shop_name', $payload['shop_name']);
+        $this->db->bind(':customer_name', $payload['customer_name']);
+        $this->db->bind(':mobile', $payload['mobile']);
+        $this->db->bind(':address', $payload['address']);
+        $this->db->bind(':sales_person_id', $payload['sales_person_id']);
+        $this->db->bind(':credit_limit', $payload['credit_limit']);
+        $this->db->bind(':is_active', $payload['is_active']);
+        $this->db->bind(':id', $customerId);
 
         if ($this->db->execute()) {
             return ['status' => 'success', 'message' => 'Customer updated successfully!'];
         }
+
         return ['status' => 'error', 'message' => 'Failed to update customer!'];
     }
 
@@ -410,6 +504,97 @@ class CustomerModel extends Helper{
             'excess_amount'      => $exceeds ? ($projectedDue - $creditLimit) : 0,
             'available_credit'   => max(0, $creditLimit - $currentDue),
         ];
+    }
+
+    /**
+     * Hub summary for customer show page.
+     */
+    public function getCustomerHubSummary(int $customerId): array
+    {
+        $usage = $this->getCustomerUsage($customerId);
+        $credit = $this->getCreditStatus($customerId);
+
+        $this->db->query('
+            SELECT COUNT(*) AS c FROM customer_payments
+            WHERE customer_id = :cid AND COALESCE(is_reversed, 0) = 0
+        ');
+        $this->db->bind(':cid', $customerId);
+        $paymentCount = (int)($this->db->single()['c'] ?? 0);
+
+        return array_merge($usage, $credit, ['payment_count' => $paymentCount]);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRecentLedgerEntries(int $customerId, int $limit = 15): array
+    {
+        if ($customerId <= 0) {
+            return [];
+        }
+
+        $limit = max(1, min(50, $limit));
+        $this->db->query("
+            SELECT cl.id, cl.transaction_date, cl.reference_type, cl.reference_id,
+                   cl.debit, cl.credit, cl.running_balance, cl.remarks,
+                   b.branch_name
+            FROM customer_ledger cl
+            LEFT JOIN branches b ON b.id = cl.branch_id
+            WHERE cl.customer_id = :cid
+            ORDER BY cl.id DESC
+            LIMIT {$limit}
+        ");
+        $this->db->bind(':cid', $customerId);
+
+        return $this->db->resultSet() ?: [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRecentInvoices(int $customerId, int $limit = 10): array
+    {
+        if ($customerId <= 0) {
+            return [];
+        }
+
+        $limit = max(1, min(30, $limit));
+        $this->db->query("
+            SELECT si.id, si.invoice_code, si.invoice_date, si.total_amount, si.status,
+                   si.is_reversed, br.branch_name
+            FROM sales_invoices si
+            LEFT JOIN branches br ON br.id = si.branch_id
+            WHERE si.customer_id = :cid
+            ORDER BY si.invoice_date DESC, si.id DESC
+            LIMIT {$limit}
+        ");
+        $this->db->bind(':cid', $customerId);
+
+        return $this->db->resultSet() ?: [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRecentPayments(int $customerId, int $limit = 10): array
+    {
+        if ($customerId <= 0) {
+            return [];
+        }
+
+        $limit = max(1, min(30, $limit));
+        $this->db->query("
+            SELECT cp.id, cp.payment_code, cp.payment_date, cp.amount, cp.transaction_type,
+                   cp.payment_mode, cp.is_reversed, br.branch_name
+            FROM customer_payments cp
+            LEFT JOIN branches br ON br.id = cp.branch_id
+            WHERE cp.customer_id = :cid
+            ORDER BY cp.payment_date DESC, cp.id DESC
+            LIMIT {$limit}
+        ");
+        $this->db->bind(':cid', $customerId);
+
+        return $this->db->resultSet() ?: [];
     }
 
     /**

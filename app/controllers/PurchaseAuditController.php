@@ -14,6 +14,14 @@ class PurchaseAuditController extends BaseController
     }
 
     /**
+     * Default entry — same as checklist (URL: PurchaseAudit or PurchaseAudit/index).
+     */
+    public function index()
+    {
+        $this->checklist();
+    }
+
+    /**
      * Purchase module audit checklist (reference rules + live DB checks).
      * URL: PurchaseAudit/checklist
      */
@@ -46,12 +54,5 @@ class PurchaseAuditController extends BaseController
     {
         $model = new PurchaseAuditModel();
         $this->sendJson($model->runHealthChecks());
-    }
-
-    protected function sendJson($data): void
-    {
-        header('Content-Type: application/json');
-        echo json_encode($data);
-        exit;
     }
 }

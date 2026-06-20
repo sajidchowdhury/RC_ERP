@@ -42,3 +42,22 @@
         min-height: 44px;
     }
 }
+
+/* GL preview aside (customer / supplier / employee create forms) */
+.acct-money-app #accounting_preview .acct-gl-preview-table {
+    font-size: 0.8125rem;
+}
+
+.acct-money-app #accounting_preview .acct-gl-preview-table th {
+    font-weight: 600;
+    color: var(--acct-money-muted);
+    border-bottom-width: 1px;
+}
+
+.acct-money-app #accounting_preview .acct-gl-preview-table td {
+    vertical-align: middle;
+}
+
+.acct-money-app #accounting_preview .fw-bold {
+    font-variant-numeric: tabular-nums;
+}

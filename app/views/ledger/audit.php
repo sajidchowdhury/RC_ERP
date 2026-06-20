@@ -1,21 +1,39 @@
 <?php
 ob_start();
+require_once __DIR__ . '/../../helpers/MasterDataAuditHelper.php';
+
 $title = $title ?? 'Ledger Audit Logs';
 $logs = $logs ?? [];
+$ledgerNames = $ledgerNames ?? [];
+
 $countCreated = $countUpdated = $countStatus = 0;
 foreach ($logs as $log) {
     $a = (string)($log['action'] ?? '');
-    if (str_contains($a, 'created')) $countCreated++;
-    elseif (str_contains($a, 'updated')) $countUpdated++;
-    else $countStatus++;
+    if (str_contains($a, 'created')) {
+        $countCreated++;
+    } elseif (str_contains($a, 'updated')) {
+        $countUpdated++;
+    } else {
+        $countStatus++;
+    }
 }
-function ledgerAuditClass(string $action): string {
-    if (str_contains($action, 'created')) return 'created';
-    if (str_contains($action, 'updated')) return 'updated';
-    if (str_contains($action, 'status') || str_contains($action, 'deleted')) return 'status';
+
+function ledgerAuditClass(string $action): string
+{
+    if (str_contains($action, 'created')) {
+        return 'created';
+    }
+    if (str_contains($action, 'updated')) {
+        return 'updated';
+    }
+    if (str_contains($action, 'status') || str_contains($action, 'deleted')) {
+        return 'status';
+    }
     return 'other';
 }
-function ledgerAuditLabel(string $action): string {
+
+function ledgerAuditActionLabel(string $action): string
+{
     return match (true) {
         str_contains($action, 'created') => 'Created',
         str_contains($action, 'updated') => 'Updated',
@@ -23,20 +41,6 @@ function ledgerAuditLabel(string $action): string {
         str_contains($action, 'deleted') => 'Deactivated',
         default => $action,
     };
-}
-function ledgerAuditDetails($details): string {
-    if (empty($details) || !is_array($details)) return '<span class="text-muted">—</span>';
-    $parts = [];
-    if (!empty($details['ledger_name'])) {
-        $parts[] = '<strong>Ledger:</strong> ' . htmlspecialchars((string)$details['ledger_name'], ENT_QUOTES);
-    }
-    if (!empty($details['via'])) {
-        $parts[] = '<span class="text-muted">' . htmlspecialchars((string)$details['via'], ENT_QUOTES) . '</span>';
-    }
-    if (empty($parts)) {
-        return '<span class="branch-audit-details">' . htmlspecialchars(json_encode($details, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '</span>';
-    }
-    return '<div class="branch-audit-details">' . implode(' · ', $parts) . '</div>';
 }
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
@@ -46,7 +50,7 @@ function ledgerAuditDetails($details): string {
     <header class="branch-hub-hero">
         <div>
             <h1><i class="fas fa-clock-rotate-left me-2"></i>Ledger audit trail</h1>
-            <p>Creates, updates, status changes, and deactivations — last 300 ledger events.</p>
+            <p>Creates, updates, status changes, and deactivations — last 300 ledger events with field-level detail.</p>
         </div>
         <div class="branch-hub-actions">
             <a href="<?= BASE_URL ?>ledger/create" class="btn btn-outline-light btn-sm"><i class="fas fa-plus me-1"></i> New ledger</a>
@@ -69,7 +73,7 @@ function ledgerAuditDetails($details): string {
                         <th>When</th>
                         <th>User</th>
                         <th>Action</th>
-                        <th>Ledger ID</th>
+                        <th>Ledger</th>
                         <th>Details</th>
                         <th>IP</th>
                     </tr>
@@ -85,13 +89,30 @@ function ledgerAuditDetails($details): string {
                     <?php else: foreach ($logs as $log):
                         $action = (string)($log['action'] ?? '');
                         $cls = ledgerAuditClass($action);
+                        $targetId = (int)($log['target_user_id'] ?? 0);
+                        $userLabel = htmlspecialchars(
+                            $log['performed_by_name'] ?? ('#' . (int)($log['performed_by'] ?? 0)),
+                            ENT_QUOTES
+                        );
+                        $ledgerLabel = $targetId > 0
+                            ? htmlspecialchars($ledgerNames[$targetId] ?? ('Ledger #' . $targetId), ENT_QUOTES)
+                            : '—';
                     ?>
                     <tr>
                         <td><small class="text-nowrap"><?= htmlspecialchars($log['timestamp'] ?? '', ENT_QUOTES) ?></small></td>
-                        <td><span class="badge rounded-pill bg-light text-dark border">#<?= (int)($log['performed_by'] ?? 0) ?></span></td>
-                        <td><span class="branch-audit-action <?= $cls ?>"><?= htmlspecialchars(ledgerAuditLabel($action), ENT_QUOTES) ?></span></td>
-                        <td><strong><?= htmlspecialchars((string)($log['target_user_id'] ?? '—'), ENT_QUOTES) ?></strong></td>
-                        <td><?= ledgerAuditDetails($log['details'] ?? []) ?></td>
+                        <td><span class="badge rounded-pill bg-light text-dark border"><?= $userLabel ?></span></td>
+                        <td><span class="branch-audit-action <?= $cls ?>"><?= htmlspecialchars(ledgerAuditActionLabel($action), ENT_QUOTES) ?></span></td>
+                        <td>
+                            <?php if ($targetId > 0): ?>
+                            <a href="<?= BASE_URL ?>ledger/show/<?= $targetId ?>" class="text-decoration-none fw-semibold">
+                                <?= $ledgerLabel ?>
+                            </a>
+                            <div class="small text-muted">#<?= $targetId ?></div>
+                            <?php else: ?>
+                            <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </td>
+                        <td><?= MasterDataAuditHelper::renderDetailsHtml($log['details'] ?? []) ?></td>
                         <td><small class="text-muted"><?= htmlspecialchars($log['ip'] ?? 'unknown', ENT_QUOTES) ?></small></td>
                     </tr>
                     <?php endforeach; endif; ?>
@@ -100,7 +121,7 @@ function ledgerAuditDetails($details): string {
         </div>
         <div class="branch-audit-meta-foot">
             <i class="fas fa-file-lines me-1"></i>
-            Stored in <code>logs/user_audit.log</code> · Filter prefix <code>ledger_</code>
+            Stored in audit log · Filter prefix <code>ledger_</code>
         </div>
     </div>
 </div>

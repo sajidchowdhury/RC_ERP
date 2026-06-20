@@ -172,7 +172,7 @@ function supNameCell(row) {
     return `<div class="branch-name-cell">
         <div class="branch-avatar">${supInitial(row.supplier_name)}</div>
         <div>
-            <div class="name">${supEscape(row.supplier_name)}</div>
+            <div class="name"><a href="${SUP_BASE}/show/${row.id}" class="text-decoration-none text-reset">${supEscape(row.supplier_name)}</a></div>
             ${mobile}
             ${addr}
         </div>
@@ -183,6 +183,7 @@ function supActionHtml(row) {
     const id = row.id;
     const name = (row.supplier_name || 'this supplier').replace(/'/g, "\\'");
     let html = '<div class="branch-action-bar">';
+    html += `<a href="${SUP_BASE}/show/${id}" class="btn-action view" title="Hub"><i class="fas fa-circle-info"></i></a>`;
     html += `<a href="${SUP_BASE}/edit/${id}" class="btn-action edit" title="Edit"><i class="fas fa-pen"></i></a>`;
     if (SUP_SHOW_DELETED) {
         html += `<button type="button" class="btn-action restore" title="Restore" onclick="restoreSupplier(${id})"><i class="fas fa-rotate-left"></i></button>`;
@@ -362,7 +363,7 @@ function renderSupplierCards(table) {
                     <div class="card-head">
                         <div class="branch-avatar">${supInitial(row.supplier_name)}</div>
                         <div class="flex-grow-1">
-                            <div class="fw-semibold">${supEscape(row.supplier_name)}</div>
+                            <div class="fw-semibold"><a href="${SUP_BASE}/show/${row.id}" class="text-decoration-none text-reset">${supEscape(row.supplier_name)}</a></div>
                             <div class="card-meta"><span class="branch-code-pill">${supEscape(row.supplier_code)}</span></div>
                             ${row.mobile ? `<div class="card-meta"><a href="tel:${supEscape(row.mobile)}">${supEscape(row.mobile)}</a></div>` : ''}
                             ${dueHtml}
@@ -370,6 +371,7 @@ function renderSupplierCards(table) {
                         </div>
                     </div>
                     <div class="card-actions branch-action-bar">
+                        <a href="${SUP_BASE}/show/${row.id}" class="btn-action view"><i class="fas fa-circle-info"></i></a>
                         <a href="${SUP_BASE}/edit/${row.id}" class="btn-action edit"><i class="fas fa-pen"></i></a>
                         ${SUP_SHOW_DELETED
                             ? `<button type="button" class="btn-action restore" onclick="restoreSupplier(${row.id})"><i class="fas fa-rotate-left"></i></button>`

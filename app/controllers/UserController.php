@@ -15,6 +15,9 @@ class UserController extends BaseController {
 
     public function __construct() {
         $this->requireLogin();
+        // NOTE: account-management actions are gated to admin tier individually
+        // (see requireAdmin() calls below). change_password/update_password stay
+        // available to every logged-in user for their own password.
         $this->userModel = new UserModel();
         $this->employeeModel = new EmployeeModel();
         $this->branchModel = new BranchModel();
@@ -22,10 +25,13 @@ class UserController extends BaseController {
 
     // List all users
     public function index() {
+        $this->requireAdmin();
         // Handle DataTables server-side AJAX request
         if (isset($_GET['draw'])) {
             $params = $_GET;
-            $params['includeDeleted'] = isset($_GET['deleted']) && $_GET['deleted'] == '1';
+            $showDeleted = isset($_GET['deleted']) && $_GET['deleted'] == '1';
+            $params['includeDeleted'] = $showDeleted;
+            $params['deletedOnly'] = $showDeleted;
 
             try {
                 $response = $this->userModel->getUsersForDataTable($params);
@@ -48,17 +54,20 @@ class UserController extends BaseController {
 
         // Normal page load - load filter data
         $branches = $this->branchModel->getAllActiveBranches();
+        $showDeleted = isset($_GET['deleted']) && $_GET['deleted'] == '1';
 
         $data = [
-            'title'    => 'System users',
-            'branches' => $branches,
-            'stats'    => $this->userModel->getUserIndexStats(),
+            'title'       => $showDeleted ? 'Deleted users' : 'System users',
+            'branches'    => $branches,
+            'stats'       => $this->userModel->getUserIndexStats(),
+            'showDeleted' => $showDeleted,
         ];
         $this->view('user/index', $data);
     }
 
     // Show create user form
     public function create() {
+        $this->requireAdmin();
         $employee_id = $_GET['employee_id'] ?? null;
         $preSelectedEmployee = null;
 
@@ -66,7 +75,7 @@ class UserController extends BaseController {
             $preSelectedEmployee = $this->employeeModel->getEmployeeById($employee_id);
         }
 
-        $employees = $this->employeeModel->getAllEmployees();
+        $employees = $this->employeeModel->getEmployeesWithoutUserAccount();
 
         $data = [
             'title' => 'Create New User',
@@ -78,29 +87,39 @@ class UserController extends BaseController {
 
     // Save new user
     public function store() {
+        $this->requireAdmin();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->validateCSRF();
             $result = $this->userModel->createUser($_POST);
 
-        if ($result['status'] === 'success') {
-            // Audit log
-            $audit = new UserAudit();
-            $audit->logUserCreated($_SESSION['user_id'] ?? 0, 0, $_POST['username'] ?? 'unknown'); // target id will be improved later
+            if ($result['status'] === 'success') {
+                $audit = new UserAudit();
+                $audit->logUserCreated(
+                    (int)($_SESSION['user_id'] ?? 0),
+                    (int)($result['user_id'] ?? 0),
+                    (string)($_POST['username'] ?? 'unknown')
+                );
 
-            $_SESSION['success'] = $result['message'];
-            $this->redirect('user/index');
-        } else {
-            $_SESSION['error'] = $result['message'];
-            $redirect = 'user/create';
-            if (!empty($_POST['employee_id'])) {
-                $redirect .= '?employee_id=' . $_POST['employee_id'];
+                $_SESSION['success'] = $result['message'];
+                $employeeId = (int)($_POST['employee_id'] ?? 0);
+                if ($employeeId > 0) {
+                    $this->redirect('employee/account/' . $employeeId);
+                    return;
+                }
+                $this->redirect('user/index');
+            } else {
+                $_SESSION['error'] = $result['message'];
+                $redirect = 'user/create';
+                if (!empty($_POST['employee_id'])) {
+                    $redirect .= '?employee_id=' . $_POST['employee_id'];
+                }
+                $this->redirect($redirect);
             }
-            $this->redirect($redirect);
         }
     }
-}
     // Show edit user form
     public function edit($id = null) {
+        $this->requireAdmin();
         if (!$id) $this->redirect('user/index');
 
         $user = $this->userModel->getUserById($id);
@@ -110,19 +129,28 @@ class UserController extends BaseController {
         }
 
         $data = [
-            'title' => 'Edit User',
-            'user' => $user
+            'title'                  => 'Edit User',
+            'user'                   => $user,
+            'telegram_column_ready'  => $this->userModel->usersColumnExists('telegram_user_id'),
         ];
         $this->view('user/edit', $data);
     }
 
     // Update user
     public function update($id = null) {
+        $this->requireAdmin();
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && $id) {
             $this->validateCSRF();
             $result = $this->userModel->updateUser($id, $_POST);
 
             if ($result['status'] === 'success') {
+                $audit = new UserAudit();
+                $audit->logUserUpdated((int)($_SESSION['user_id'] ?? 0), (int)$id, [
+                    'username'         => trim((string)($_POST['username'] ?? '')),
+                    'is_active'        => (int)($_POST['is_active'] ?? 1),
+                    'password_changed' => !empty($_POST['password']),
+                ]);
+
                 $_SESSION['success'] = $result['message'];
             } else {
                 $_SESSION['error'] = $result['message'];
@@ -133,37 +161,155 @@ class UserController extends BaseController {
 
     // Toggle user active/inactive
     public function toggle($id = null) {
-        if ($id) {
-            if ($this->userModel->toggleStatus($id)) {
-                $audit = new UserAudit();
-                $audit->logUserStatusChanged($_SESSION['user_id'] ?? 0, (int)$id, true);
-
-                $_SESSION['success'] = "User status updated successfully!";
-            } else {
-                $_SESSION['error'] = "Cannot deactivate this user. This is the last active user in the system.";
-            }
+        $this->requireAdmin();
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) {
+            $this->redirect('user/index');
+            return;
         }
-        $this->redirect('user/index');
+
+        $this->validateCSRF();
+
+        if ($this->userModel->toggleStatus($id)) {
+            $audit = new UserAudit();
+            $audit->logUserStatusChanged($_SESSION['user_id'] ?? 0, (int)$id, true);
+            $this->finishUserMutation(true, 'User status updated successfully!', 'user/index');
+            return;
+        }
+
+        $this->finishUserMutation(
+            false,
+            'Cannot deactivate this user. This is the last active user in the system.',
+            'user/index'
+        );
     }
 
     // Soft delete user (safer than hard delete)
     public function delete($id = null) {
-        if ($id) {
-            if ($this->userModel->softDeleteUser((int)$id, $_SESSION['user_id'] ?? 0)) {
-                $audit = new UserAudit();
-                $audit->log($_SESSION['user_id'] ?? 0, 'user_soft_deleted', (int)$id);
-
-                $_SESSION['success'] = "User has been deleted (soft delete).";
-            } else {
-                $_SESSION['error'] = "Cannot delete this user. It may be the last active user.";
-            }
+        $this->requireAdmin();
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) {
+            $this->redirect('user/index');
+            return;
         }
-        $this->redirect('user/index');
+
+        $this->validateCSRF();
+
+        if ($this->userModel->softDeleteUser((int)$id, $_SESSION['user_id'] ?? 0)) {
+            $audit = new UserAudit();
+            $audit->log($_SESSION['user_id'] ?? 0, 'user_soft_deleted', (int)$id);
+            $this->finishUserMutation(true, 'User has been deleted (soft delete).', 'user/index');
+            return;
+        }
+
+        $this->finishUserMutation(false, 'Cannot delete this user. It may be the last active user.', 'user/index');
+    }
+
+    // Restore soft-deleted user
+    public function restore($id = null) {
+        $this->requireAdmin();
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) {
+            $this->redirect('user/index?deleted=1');
+            return;
+        }
+
+        $this->validateCSRF();
+
+        $result = $this->userModel->restoreUser((int)$id);
+
+        if ($result['status'] === 'success') {
+            $audit = new UserAudit();
+            $audit->log($_SESSION['user_id'] ?? 0, 'user_restored', (int)$id);
+            $this->finishUserMutation(true, $result['message'], 'user/index?deleted=1');
+            return;
+        }
+
+        $this->finishUserMutation(false, $result['message'], 'user/index?deleted=1');
+    }
+
+    private function finishUserMutation(bool $success, string $message, string $redirectPath): void
+    {
+        if ($this->isAjaxRequest()) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'status'  => $success ? 'success' : 'error',
+                'message' => $message,
+            ]);
+            exit;
+        }
+
+        if ($success) {
+            $_SESSION['success'] = $message;
+        } else {
+            $_SESSION['error'] = $message;
+        }
+
+        $this->redirect($redirectPath);
+    }
+
+    // Clear persisted account lockout
+    public function unlock($id = null) {
+        $this->requireAdmin();
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) {
+            $this->redirect('user/index');
+            return;
+        }
+
+        $this->validateCSRF();
+        $result = $this->userModel->unlockUser((int)$id);
+
+        if ($result['status'] === 'success') {
+            $audit = new UserAudit();
+            $audit->log($_SESSION['user_id'] ?? 0, 'user_unlocked', (int)$id);
+            $_SESSION['success'] = $result['message'];
+        } else {
+            $_SESSION['error'] = $result['message'];
+        }
+
+        $this->redirect('user/edit/' . (int)$id);
+    }
+
+    // Admin-generated one-time password reset link
+    public function generate_reset_link($id = null) {
+        $this->requireAdmin();
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) {
+            $this->redirect('user/index');
+            return;
+        }
+
+        $this->validateCSRF();
+
+        $user = $this->userModel->getUserById((int)$id);
+        if (!$user || !empty($user['deleted_at'])) {
+            $_SESSION['error'] = 'User not found.';
+            $this->redirect('user/index');
+            return;
+        }
+
+        require_once '../core/PasswordReset.php';
+        $tokenData = PasswordReset::createToken((int)$id);
+
+        if ($tokenData === null) {
+            $_SESSION['error'] = 'Failed to generate reset link.';
+            $this->redirect('user/edit/' . (int)$id);
+            return;
+        }
+
+        $resetUrl = BASE_URL . 'auth/reset/' . urlencode($tokenData[0]);
+        PasswordReset::sendResetEmail((int)$id, $tokenData[0]);
+
+        require_once '../core/RememberMe.php';
+        RememberMe::revokeAllForUser((int)$id);
+
+        $audit = new UserAudit();
+        $audit->log($_SESSION['user_id'] ?? 0, 'user_reset_link_generated', (int)$id);
+
+        $_SESSION['success'] = 'Reset link generated (valid until ' . $tokenData[1] . '): ' . $resetUrl;
+        $this->redirect('user/edit/' . (int)$id);
     }
 
 
     // Show Menu Permission Page
     public function permission($user_id = null) {
+        $this->requireAdmin();
         if (!$user_id) $this->redirect('user/index');
 
         $user = $this->userModel->getUserById($user_id);
@@ -175,23 +321,75 @@ class UserController extends BaseController {
         // Get all menus
         require_once '../app/models/MenuModel.php';
         $menuModel = new MenuModel();
-        $menus = $menuModel->getAllMenus();
+        $menus = $menuModel->getAllMenusHierarchical();
 
         // Get current permissions for this user
         $currentPermissions = $this->userModel->getUserPermissions($user_id);
+        $copyCandidates = $this->userModel->getUsersForPermissionCopy((int)$user_id);
+
+        $viewCount = 0;
+        $editCount = 0;
+        foreach ($currentPermissions as $perm) {
+            if (!empty($perm['view'])) {
+                $viewCount++;
+            }
+            if (!empty($perm['edit'])) {
+                $editCount++;
+            }
+        }
 
         $data = [
             'title' => 'Menu Permissions - ' . $user['username'],
             'user' => $user,
             'menus' => $menus,
-            'currentPermissions' => $currentPermissions
+            'currentPermissions' => $currentPermissions,
+            'copyCandidates' => $copyCandidates,
+            'permissionStats' => [
+                'view_count'  => $viewCount,
+                'edit_count'  => $editCount,
+                'menu_count'  => count($currentPermissions),
+            ],
         ];
 
         $this->view('user/permission', $data);
     }
 
+    /**
+     * JSON: permission map for copy-from-user (admin only).
+     */
+    public function permission_json($user_id = null) {
+        $this->requireAdmin();
+
+        $userId = (int)$user_id;
+        if ($userId <= 0) {
+            http_response_code(400);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'message' => 'Invalid user id.']);
+            exit;
+        }
+
+        $user = $this->userModel->getUserById($userId);
+        if (!$user) {
+            http_response_code(404);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['status' => 'error', 'message' => 'User not found.']);
+            exit;
+        }
+
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'status'        => 'success',
+            'user_id'       => $userId,
+            'username'      => (string)($user['username'] ?? ''),
+            'employee_name' => (string)($user['employee_name'] ?? ''),
+            'permissions'   => $this->userModel->getUserPermissions($userId),
+        ]);
+        exit;
+    }
+
     // Save Menu Permissions
     public function save_permissions() {
+        $this->requireAdmin();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->validateCSRF();
             $user_id = (int)$_POST['user_id'];
@@ -255,11 +453,237 @@ class UserController extends BaseController {
     }
 
     /**
+     * Two-factor authentication setup for the logged-in user.
+     */
+    public function two_factor() {
+        require_once '../core/TwoFactorAuth.php';
+        require_once '../core/Totp.php';
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $status = TwoFactorAuth::getStatus($userId);
+        $provisioningUri = null;
+        $qrUrl = null;
+        $account = $this->userModel->getUserById($userId);
+
+        if (!empty($status['secret'])) {
+            $provisioningUri = Totp::provisioningUri(
+                (string)$status['username'],
+                (string)$status['secret'],
+                TwoFactorAuth::issuer()
+            );
+            $qrUrl = BASE_URL . 'user/two_factor_qr';
+        }
+
+        $this->view('user/two_factor', [
+            'title'                  => 'Two-Factor Authentication',
+            'status'                 => $status,
+            'provisioningUri'        => $provisioningUri,
+            'qrUrl'                  => $qrUrl,
+            'telegram_user_id'       => $account['telegram_user_id'] ?? null,
+            'telegram_column_ready'  => $this->userModel->usersColumnExists('telegram_user_id'),
+        ]);
+    }
+
+    /**
+     * Save Telegram chat id for the logged-in user (self-service).
+     */
+    public function update_telegram() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->redirect('user/two_factor');
+            return;
+        }
+
+        $this->validateCSRF();
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            $this->redirect('auth/login');
+            return;
+        }
+
+        $result = $this->userModel->updateTelegramUserId($userId, $_POST['telegram_user_id'] ?? null);
+        if (($result['status'] ?? '') === 'success') {
+            $_SESSION['success'] = $result['message'];
+        } else {
+            $_SESSION['error'] = $result['message'] ?? 'Could not save Telegram User ID.';
+        }
+
+        $this->redirect('user/two_factor');
+    }
+
+    public function two_factor_setup() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->redirect('user/two_factor');
+            return;
+        }
+
+        $this->validateCSRF();
+        require_once '../core/TwoFactorAuth.php';
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $result = TwoFactorAuth::beginSetup($userId);
+
+        if ($result['status'] === 'success') {
+            $_SESSION['success'] = 'Scan the QR code or enter the secret in your authenticator app, then confirm with a code.';
+        } else {
+            $_SESSION['error'] = $result['message'] ?? 'Setup failed.';
+        }
+
+        $this->redirect('user/two_factor');
+    }
+
+    public function two_factor_confirm() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->redirect('user/two_factor');
+            return;
+        }
+
+        $this->validateCSRF();
+        require_once '../core/TwoFactorAuth.php';
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $result = TwoFactorAuth::confirmSetup($userId, trim($_POST['code'] ?? ''));
+
+        if ($result['status'] === 'success') {
+            $audit = new UserAudit();
+            $audit->log($userId, 'user_2fa_enabled', $userId);
+            require_once '../core/CredentialVersion.php';
+            CredentialVersion::syncSession($userId);
+            $_SESSION['success'] = $result['message'];
+        } else {
+            $_SESSION['error'] = $result['message'] ?? 'Confirmation failed.';
+        }
+
+        $this->redirect('user/two_factor');
+    }
+
+    public function two_factor_disable() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->redirect('user/two_factor');
+            return;
+        }
+
+        $this->validateCSRF();
+        require_once '../core/TwoFactorAuth.php';
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $result = TwoFactorAuth::disable(
+            $userId,
+            (string)($_POST['current_password'] ?? ''),
+            trim($_POST['code'] ?? '')
+        );
+
+        if ($result['status'] === 'success') {
+            $audit = new UserAudit();
+            $audit->log($userId, 'user_2fa_disabled', $userId);
+            require_once '../core/CredentialVersion.php';
+            CredentialVersion::syncSession($userId);
+            $_SESSION['success'] = $result['message'];
+        } else {
+            $_SESSION['error'] = $result['message'] ?? 'Failed to disable 2FA.';
+        }
+
+        $this->redirect('user/two_factor');
+    }
+
+    /**
+     * Self-hosted QR PNG for pending 2FA setup (D5).
+     */
+    public function two_factor_qr() {
+        require_once '../core/TwoFactorAuth.php';
+        require_once '../core/Totp.php';
+        require_once '../core/QrRenderer.php';
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $status = TwoFactorAuth::getStatus($userId);
+
+        if (empty($status['secret'])) {
+            http_response_code(404);
+            exit;
+        }
+
+        $uri = Totp::provisioningUri(
+            (string)$status['username'],
+            (string)$status['secret'],
+            TwoFactorAuth::issuer()
+        );
+
+        QrRenderer::emitPng($uri, 200);
+    }
+
+    /**
+     * Admin recovery: disable 2FA for another user (C4).
+     */
+    public function admin_disable_two_factor($id = null) {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->redirect('user/index');
+            return;
+        }
+
+        $this->requireAdmin();
+        $this->validateCSRF();
+        require_once '../core/TwoFactorAuth.php';
+
+        $userId = (int)$id;
+        $user = $this->userModel->getUserById($userId);
+
+        if (!$user) {
+            $_SESSION['error'] = 'User not found.';
+            $this->redirect('user/index');
+            return;
+        }
+
+        $result = TwoFactorAuth::adminDisable($userId);
+
+        if ($result['status'] === 'success') {
+            $audit = new UserAudit();
+            $audit->log((int)($_SESSION['user_id'] ?? 0), 'user_2fa_admin_disabled', $userId);
+            $_SESSION['success'] = $result['message'];
+        } else {
+            $_SESSION['error'] = $result['message'] ?? 'Failed to disable 2FA.';
+        }
+
+        $employeeId = (int)($user['employee_id'] ?? 0);
+        if ($employeeId > 0) {
+            $this->redirect('employee/account/' . $employeeId);
+            return;
+        }
+
+        $this->redirect('user/edit/' . $userId);
+    }
+
+    /**
+     * Unified security audit — login + user + employee events.
+     */
+    public function security_audit() {
+        $this->requireAdmin();
+        require_once __DIR__ . '/../services/Security/SecurityAuditService.php';
+
+        $filters = [
+            'source'  => $_GET['source'] ?? 'all',
+            'outcome' => $_GET['outcome'] ?? 'all',
+            'q'       => $_GET['q'] ?? '',
+            'limit'   => 300,
+        ];
+
+        $service = new SecurityAuditService();
+        $result = $service->getUnifiedAudit($filters);
+
+        $this->view('user/security_audit', [
+            'title'   => 'Security audit',
+            'entries' => $result['entries'],
+            'stats'   => $result['stats'],
+            'filters' => $filters,
+        ]);
+    }
+
+    /**
      * Simple Audit Log viewer for User-related actions
      */
     public function audit() {
+        $this->requireAdmin();
         $audit = new UserAudit();
-        $logs = $audit->getRecentLogs(300, 'user_'); // Filter to user-related actions
+        $logs = $audit->enrichWithPerformerNames($audit->getRecentLogs(300, 'user_'));
 
         $data = [
             'title' => 'User Audit Logs',

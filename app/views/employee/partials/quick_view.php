@@ -99,9 +99,9 @@ $roleLabel = ucwords(str_replace('_', ' ', $employee['role'] ?? ''));
             // Check if employee has a user account (we'll enhance this later if needed)
             $hasUser = !empty($employee['has_user_account']) || !empty($employee['has_active_user']);
         ?>
-        <?php if ($hasUser): ?>
-            <a href="<?= BASE_URL ?>user/permission?employee_id=<?= $employee['id'] ?>" class="btn btn-outline-primary btn-sm">
-                <i class="fas fa-user-cog me-1"></i> Manage User Account
+        <?php if ($hasUser && !empty($employee['user_id'])): ?>
+            <a href="<?= BASE_URL ?>employee/account/<?= (int)$employee['id'] ?>" class="btn btn-outline-primary btn-sm">
+                <i class="fas fa-id-card-clip me-1"></i> Employee &amp; account
             </a>
         <?php else: ?>
             <a href="<?= BASE_URL ?>user/create?employee_id=<?= $employee['id'] ?>" class="btn btn-outline-info btn-sm">

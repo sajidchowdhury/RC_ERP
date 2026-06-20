@@ -1,7 +1,7 @@
 <?php
 ob_start();
 $title = $title ?? 'New supplier payment';
-$suppliers = $suppliers ?? [];
+$preselectSupplier = $preselectSupplier ?? null;
 $banks = $banks ?? [];
 $employees = $employees ?? [];
 $today = $today ?? date('Y-m-d');
@@ -17,7 +17,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         <div>
             <h1><i class="fas fa-plus me-2"></i>New supplier payment</h1>
             <p>Record payment, advance, or receive against supplier payables.</p>
-            <span class="hero-badge"><i class="fas fa-book"></i> supplier_ledger</span>
+            <span class="hero-badge"><i class="fas fa-building"></i> <?= htmlspecialchars($branch_name ?? 'Branch', ENT_QUOTES) ?></span>
         </div>
         <div class="branch-hub-actions">
             <a href="<?= BASE_URL ?>SupplierTransaction" class="btn btn-outline-light btn-sm">
@@ -28,7 +28,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 
     <div class="branch-form-layout has-aside">
         <div class="branch-form-panel">
-            <form id="supplierTransactionForm" class="needs-validation" novalidate>
+            <form id="supplierTransactionForm" class="needs-validation" novalidate aria-label="New supplier payment">
                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
 
                 <div class="branch-form-section">
@@ -38,18 +38,27 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                     </div>
                     <div class="row g-3">
                         <div class="col-12 col-md-6">
-                            <label class="form-label" for="supplier_id">Supplier <span class="text-danger">*</span></label>
-                            <select name="supplier_id" id="supplier_id" class="form-select" required>
-                                <option value="">— Select supplier —</option>
-                                <?php
-                                $preselectSupplier = (int)($_GET['supplier_id'] ?? 0);
-                                foreach ($suppliers as $s): ?>
-                                <option value="<?= (int)$s['id'] ?>"<?= $preselectSupplier === (int)$s['id'] ? ' selected' : '' ?>>
-                                    <?= htmlspecialchars($s['supplier_name'] ?? '', ENT_QUOTES) ?>
-                                    <?php if (!empty($s['mobile'])): ?> (<?= htmlspecialchars($s['mobile'], ENT_QUOTES) ?>)<?php endif; ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="hidden" name="supplier_id" id="supplier_id" value="<?= (int)($preselectSupplier['id'] ?? 0) ?>">
+                            <label class="form-label" for="suppTxnSupplierSearch" id="suppTxnSupplierSearchLabel">
+                                Supplier <span class="text-danger">*</span>
+                            </label>
+                            <div class="supp-txn-supplier-picker">
+                                <div class="position-relative flex-grow-1">
+                                    <input type="text" id="suppTxnSupplierSearch" class="form-control supp-txn-search-input"
+                                           placeholder="Search name, mobile, or code…" autocomplete="off"
+                                           value="<?= htmlspecialchars($preselectSupplier['supplier_name'] ?? '', ENT_QUOTES) ?>">
+                                    <div id="suppTxnSupplierSuggestions" class="supp-txn-suggest-list"></div>
+                                </div>
+                                <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="suppTxnChangeSupplier" title="Change supplier">
+                                    Change
+                                </button>
+                            </div>
+                            <div id="suppTxnSupplierRecents" class="supp-txn-recents mt-2"></div>
+                            <div id="suppTxnSupplierHubLink" class="small mt-1<?= empty($preselectSupplier) ? ' d-none' : '' ?>">
+                                <a href="<?= BASE_URL ?>supplier/show/<?= (int)($preselectSupplier['id'] ?? 0) ?>" id="suppTxnSupplierHubAnchor">
+                                    <i class="fas fa-circle-info me-1"></i> Supplier hub
+                                </a>
+                            </div>
                         </div>
                         <div class="col-12 col-md-6">
                             <label class="form-label" for="collected_by">Paid by <span class="text-danger">*</span></label>
@@ -60,7 +69,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                             </select>
                         </div>
                     </div>
-                    <div id="dueSummary" class="supp-txn-due-banner d-none mt-3"></div>
+                    <div id="dueSummary" class="supp-txn-due-banner d-none mt-3" role="status" aria-live="polite"></div>
                 </div>
 
                 <div class="branch-form-section">
@@ -71,17 +80,17 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                     <div class="row g-3">
                         <div class="col-12 col-md-4">
                             <label class="form-label" for="transaction_type">Type <span class="text-danger">*</span></label>
-                            <select name="transaction_type" id="transaction_type" class="form-select" required>
+                            <select name="transaction_type" id="transaction_type" class="form-select" required aria-required="true" aria-describedby="typeHint">
                                 <option value="">— Select —</option>
                                 <option value="payment">Payment to supplier</option>
                                 <option value="advance">Advance payment</option>
                                 <option value="receive">Receive from supplier</option>
                             </select>
-                            <div id="typeHint" class="supp-txn-type-hint mt-1"></div>
+                            <div id="typeHint" class="supp-txn-type-hint mt-1" role="note"></div>
                         </div>
                         <div class="col-12 col-md-4">
                             <label class="form-label" for="amount">Amount (Tk) <span class="text-danger">*</span></label>
-                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required>
+                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required aria-required="true" inputmode="decimal" autocomplete="off">
                         </div>
                         <div class="col-12 col-md-4">
                             <label class="form-label" for="transaction_date">Date</label>
@@ -132,27 +141,28 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         </div>
 
         <aside class="branch-form-aside">
-            <div class="aside-title">Tips</div>
-            <div class="branch-aside-tip">
+            <div class="aside-title">GL preview</div>
+            <div id="accounting_preview" class="branch-preview-card" role="region" aria-label="GL posting preview" aria-live="polite">
+                <p class="text-muted small mb-0">Select supplier, type, and amount to preview double-entry.</p>
+            </div>
+            <div class="branch-aside-tip mt-3">
                 <i class="fas fa-hand-holding-dollar me-1"></i>
-                <strong>Payment / advance</strong> — Dr AP, Cr cash/bank (reduce payable). <strong>Receive</strong> — Dr cash/bank, Cr AP.
+                <strong>Payment / advance</strong> — Dr AP, Cr cash/bank (same control as GRN payable).
             </div>
             <div class="branch-aside-tip mt-2">
-                <i class="fas fa-building-columns me-1"></i>
-                Bank mode updates <code>banks.balance</code> on payment (out) and receive (in).
-            </div>
-            <div class="branch-preview-card mt-3">
-                <div class="aside-title mb-2">Preview</div>
-                <div class="branch-avatar" id="previewAvatar">?</div>
-                <div class="preview-name" id="previewSupplier">Supplier</div>
-                <div class="preview-code" id="previewType">Type</div>
-                <div class="mt-2 supp-txn-amount payment" id="previewAmount">Tk 0</div>
+                <i class="fas fa-arrow-down me-1"></i>
+                <strong>Receive</strong> — Dr cash/bank, Cr AP (refund or credit from supplier).
             </div>
         </aside>
     </div>
 </div>
 
-<script>window.ST_BOOT = { baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?> };</script>
+<script>window.ST_BOOT = {
+    baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?>,
+    preselectSupplier: <?= json_encode($preselectSupplier ?: null, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) ?>,
+    glLabels: <?= json_encode($gl_preview_labels ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) ?>
+};</script>
+<script src="<?= BASE_URL ?>assets/js/accounting-journal-preview.js"></script>
 <script src="<?= BASE_URL ?>assets/js/SupplierTransaction.js"></script>
 
 <?php

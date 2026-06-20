@@ -5,6 +5,8 @@ $summary = $report['summary'] ?? [];
 $branchName = $branch_name ?? 'Branch';
 $ranAt = $report['ran_at'] ?? date('Y-m-d H:i:s');
 $negativeStocks = $report['negative_stocks'] ?? [];
+$missingGrnJournals = $report['missing_grn_journals'] ?? [];
+$missingReturnJournals = $report['missing_return_journals'] ?? [];
 
 $statusIcon = static function (string $status): string {
     return match ($status) {
@@ -30,6 +32,7 @@ ob_start();
             <button type="button" class="btn btn-light btn-sm" id="btnRefreshPurchaseAudit">
                 <i class="fas fa-sync-alt me-1"></i> Re-run checks
             </button>
+            <a href="<?= BASE_URL ?>PurchaseAudit/checklist" class="btn btn-light btn-sm"><i class="fas fa-clipboard-check me-1"></i> This checklist</a>
             <a href="<?= BASE_URL ?>PurchaseOrder" class="btn btn-light btn-sm"><i class="fas fa-file-invoice me-1"></i> PO</a>
             <a href="<?= BASE_URL ?>PurchaseReceive" class="btn btn-light btn-sm"><i class="fas fa-dolly me-1"></i> GRN</a>
             <a href="<?= BASE_URL ?>PurchaseReturn" class="btn btn-light btn-sm"><i class="fas fa-undo me-1"></i> Returns</a>
@@ -112,6 +115,48 @@ ob_start();
                         <td><?= htmlspecialchars($row['product_name'] ?? '', ENT_QUOTES) ?></td>
                         <td class="text-end"><?= number_format((float)($row['ws_qty'] ?? 0), 2) ?></td>
                         <td class="text-end"><?= number_format((float)($row['avg_cost'] ?? 0), 2) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($missingGrnJournals !== []): ?>
+    <section class="purch-audit-section mt-3">
+        <div class="purch-audit-section-head"><i class="fas fa-dolly"></i> GRNs missing journal (sample)</div>
+        <div class="table-responsive p-2">
+            <table class="table table-sm table-bordered mb-0">
+                <thead><tr><th>GRN</th><th>Date</th><th class="text-end">Total</th><th></th></tr></thead>
+                <tbody>
+                <?php foreach ($missingGrnJournals as $row): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($row['receive_code'] ?? '', ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($row['receive_date'] ?? '', ENT_QUOTES) ?></td>
+                        <td class="text-end"><?= number_format((float)($row['total_amount'] ?? 0), 2) ?></td>
+                        <td><a href="<?= BASE_URL ?>PurchaseReceive/details/<?= (int)($row['id'] ?? 0) ?>">GL detail</a></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($missingReturnJournals !== []): ?>
+    <section class="purch-audit-section mt-3">
+        <div class="purch-audit-section-head"><i class="fas fa-undo-alt"></i> Returns missing journal (sample)</div>
+        <div class="table-responsive p-2">
+            <table class="table table-sm table-bordered mb-0">
+                <thead><tr><th>Return</th><th>GRN</th><th class="text-end">Total</th><th></th></tr></thead>
+                <tbody>
+                <?php foreach ($missingReturnJournals as $row): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($row['return_code'] ?? '', ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($row['receive_code'] ?? '', ENT_QUOTES) ?></td>
+                        <td class="text-end"><?= number_format((float)($row['total_amount'] ?? 0), 2) ?></td>
+                        <td><a href="<?= BASE_URL ?>PurchaseReturn/details/<?= (int)($row['id'] ?? 0) ?>">GL detail</a></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>

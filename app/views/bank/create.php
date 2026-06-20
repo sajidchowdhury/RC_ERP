@@ -1,6 +1,8 @@
 <?php
 ob_start();
 $title = $title ?? 'Create New Bank Account';
+$bankGlLedgers = $bank_gl_ledgers ?? [];
+$bankMappingEnabled = !empty($bank_mapping_enabled);
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/bank-theme.css">
@@ -40,6 +42,18 @@ $title = $title ?? 'Create New Bank Account';
                 <div class="preview-code" id="previewAccount">Account number</div>
                 <div class="mt-2 small text-muted" id="previewBranch">Branch</div>
             </div>
+            <?php if ($bankMappingEnabled && $bankGlLedgers !== []): ?>
+            <div class="aside-title mt-3">GL posting account</div>
+            <p class="small text-muted mb-2">Optional — assign a cash/bank ledger now instead of defaulting to bank control on first edit.</p>
+            <select name="gl_ledger_id" class="form-select form-select-sm" form="bankForm">
+                <option value="">— Default bank control —</option>
+                <?php foreach ($bankGlLedgers as $ledger): ?>
+                <option value="<?= (int)$ledger['id'] ?>">
+                    <?= htmlspecialchars(($ledger['ledger_code'] ?? '') . ' — ' . ($ledger['ledger_name'] ?? ''), ENT_QUOTES) ?>
+                </option>
+                <?php endforeach; ?>
+            </select>
+            <?php endif; ?>
             <div class="branch-aside-tip">
                 <i class="fas fa-lightbulb me-1"></i>
                 New accounts are <strong>active</strong> by default. Balance updates when you post payments, transfers, or accounting entries — not on this screen.

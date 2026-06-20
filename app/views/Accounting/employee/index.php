@@ -3,6 +3,7 @@ ob_start();
 $title = $title ?? 'Employee transactions';
 $transactions = $transactions ?? [];
 $filters = $filters ?? [];
+$showReversed = $showReversed ?? false;
 $stats = $stats ?? ['total' => 0, 'active' => 0, 'reversed' => 0, 'out_today' => 0, 'out_month' => 0];
 $branch_name = $branch_name ?? 'Head Office';
 $employees = $employees ?? [];
@@ -43,16 +44,32 @@ function empTxnTypeClass(string $type): string {
             <?php endif; ?>
         </div>
         <div class="branch-hub-actions">
+            <?php if (!$showReversed): ?>
             <a href="<?= BASE_URL ?>EmployeeTransaction/create" class="btn btn-light btn-sm">
                 <i class="fas fa-plus me-1"></i> New transaction
             </a>
+            <?php endif; ?>
+            <a href="<?= BASE_URL ?>EmployeeTransaction/audit" class="btn btn-outline-dark btn-sm">
+                <i class="fas fa-history me-1"></i> Audit
+            </a>
+            <?php if ($showReversed): ?>
+            <a href="<?= BASE_URL ?>EmployeeTransaction" class="btn btn-outline-light btn-sm">Show active</a>
+            <?php else: ?>
+            <a href="<?= BASE_URL ?>EmployeeTransaction?reversed=1" class="btn btn-outline-light btn-sm">
+                <i class="fas fa-undo me-1"></i> Reversed
+            </a>
+            <?php endif; ?>
         </div>
     </header>
 
     <div class="branch-hub-stats">
         <div class="branch-stat-card">
-            <div class="branch-stat-icon teal"><i class="fas fa-receipt"></i></div>
-            <div><div class="stat-value"><?= (int)($stats['active'] ?? 0) ?></div><div class="stat-label">Active vouchers</div></div>
+            <div class="branch-stat-icon slate"><i class="fas fa-receipt"></i></div>
+            <div><div class="stat-value"><?= (int)($stats['total'] ?? 0) ?></div><div class="stat-label">Total vouchers</div></div>
+        </div>
+        <div class="branch-stat-card">
+            <div class="branch-stat-icon teal"><i class="fas fa-check"></i></div>
+            <div><div class="stat-value"><?= (int)($stats['active'] ?? 0) ?></div><div class="stat-label">Active</div></div>
         </div>
         <div class="branch-stat-card">
             <div class="branch-stat-icon amber"><i class="fas fa-sun"></i></div>
@@ -74,28 +91,29 @@ function empTxnTypeClass(string $type): string {
         </div>
     </div>
 
-    <nav class="branch-hub-quick">
-        <a href="<?= BASE_URL ?>employee"><i class="fas fa-id-badge"></i> Employees</a>
-        <a href="<?= BASE_URL ?>bank"><i class="fas fa-building-columns"></i> Banks</a>
-        <a href="<?= BASE_URL ?>ledger"><i class="fas fa-book"></i> Chart of accounts</a>
-    </nav>
+    <?php include __DIR__ . '/../../partials/accounting_quick_nav.php'; ?>
 
-    <div class="branch-hub-panel">
-        <form method="get" class="branch-hub-filters" id="empTxnFilterForm">
-            <div class="row g-3 align-items-end">
+    <div class="branch-hub-panel acct-has-mobile-cards">
+        <form method="get" class="branch-hub-filters acct-touch-filters" id="empTxnFilterForm" aria-label="Filter employee transactions">
+            <details class="acct-filter-drawer" open>
+                <summary><i class="fas fa-filter"></i> Filters</summary>
+                <div class="row g-3 align-items-end">
+            <?php if ($showReversed): ?>
+            <input type="hidden" name="reversed" value="1">
+            <?php endif; ?>
                 <div class="col-6 col-md-2">
-                    <div class="filter-label">From</div>
-                    <input type="date" name="date_from" class="form-control form-control-sm"
+                    <label class="filter-label" for="empFilterFrom">From</label>
+                    <input type="date" name="date_from" id="empFilterFrom" class="form-control form-control-sm"
                            value="<?= htmlspecialchars($filters['date_from'] ?? '', ENT_QUOTES) ?>">
                 </div>
                 <div class="col-6 col-md-2">
-                    <div class="filter-label">To</div>
-                    <input type="date" name="date_to" class="form-control form-control-sm"
+                    <label class="filter-label" for="empFilterTo">To</label>
+                    <input type="date" name="date_to" id="empFilterTo" class="form-control form-control-sm"
                            value="<?= htmlspecialchars($filters['date_to'] ?? '', ENT_QUOTES) ?>">
                 </div>
                 <div class="col-6 col-md-2">
-                    <div class="filter-label">Type</div>
-                    <select name="transaction_type" class="form-select form-select-sm">
+                    <label class="filter-label" for="empFilterType">Type</label>
+                    <select name="transaction_type" id="empFilterType" class="form-select form-select-sm">
                         <option value="all">All types</option>
                         <?php foreach (['advance','loan','repayment','salary','deduction','adjustment'] as $tt): ?>
                         <option value="<?= $tt ?>" <?= ($filters['transaction_type'] ?? '') === $tt ? 'selected' : '' ?>><?= empTxnTypeLabel($tt) ?></option>
@@ -103,24 +121,24 @@ function empTxnTypeClass(string $type): string {
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <div class="filter-label">Status</div>
-                    <select name="status" class="form-select form-select-sm">
+                    <label class="filter-label" for="empFilterStatus">Status</label>
+                    <select name="status" id="empFilterStatus" class="form-select form-select-sm"<?= $showReversed ? ' disabled' : '' ?>>
                         <option value="all">All</option>
                         <option value="active" <?= ($filters['status'] ?? '') === 'active' ? 'selected' : '' ?>>Active</option>
                         <option value="reversed" <?= ($filters['status'] ?? '') === 'reversed' ? 'selected' : '' ?>>Reversed</option>
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <div class="filter-label">Mode</div>
-                    <select name="payment_mode" class="form-select form-select-sm">
+                    <label class="filter-label" for="empFilterMode">Mode</label>
+                    <select name="payment_mode" id="empFilterMode" class="form-select form-select-sm">
                         <option value="all">Any</option>
                         <option value="cash" <?= ($filters['payment_mode'] ?? '') === 'cash' ? 'selected' : '' ?>>Cash</option>
                         <option value="bank" <?= ($filters['payment_mode'] ?? '') === 'bank' ? 'selected' : '' ?>>Bank</option>
                     </select>
                 </div>
                 <div class="col-12 col-md-4">
-                    <div class="filter-label">Employee</div>
-                    <select name="employee_id" class="form-select form-select-sm">
+                    <label class="filter-label" for="empFilterEmployee">Employee</label>
+                    <select name="employee_id" id="empFilterEmployee" class="form-select form-select-sm">
                         <option value="">All employees</option>
                         <?php foreach ($employees as $e): ?>
                         <option value="<?= (int)$e['id'] ?>"<?= (int)($filters['employee_id'] ?? 0) === (int)$e['id'] ? ' selected' : '' ?>>
@@ -131,19 +149,20 @@ function empTxnTypeClass(string $type): string {
                 </div>
                 <div class="col-12 col-md-4 d-flex gap-2 flex-wrap align-items-end">
                     <button type="submit" class="btn btn-primary btn-sm flex-fill"><i class="fas fa-search me-1"></i> Search</button>
-                    <a href="<?= BASE_URL ?>EmployeeTransaction" class="btn btn-outline-secondary btn-sm" title="Today only">Today</a>
+                    <a href="<?= BASE_URL ?>EmployeeTransaction" class="btn btn-outline-secondary btn-sm" title="Today only" aria-label="Show all transactions">Today</a>
                 </div>
-            </div>
+                </div>
+            </details>
         </form>
 
         <?php if (empty($transactions)): ?>
-        <p class="text-muted text-center py-3 mb-0 d-none d-md-block">
+        <p class="text-muted text-center py-3 mb-0 acct-desktop-only">
             No transactions match these filters.
             <a href="<?= BASE_URL ?>EmployeeTransaction/create">Record a transaction</a>
         </p>
         <?php endif; ?>
 
-        <div class="branch-hub-table-wrap d-none d-md-block<?= empty($transactions) ? ' d-none' : '' ?>">
+        <div class="branch-hub-table-wrap acct-desktop-table<?= empty($transactions) ? ' d-none' : '' ?>">
             <table class="table table-borderless mb-0 w-100" id="empTxnTable">
                 <thead>
                     <tr>
@@ -208,11 +227,12 @@ function empTxnTypeClass(string $type): string {
                 </tbody>
             </table>
         </div>
-        <div id="empTxnCards" class="d-md-none" aria-live="polite"></div>
+        <div id="empTxnCards" class="acct-mobile-only acct-mobile-list" aria-live="polite" aria-label="Employee transactions"></div>
     </div>
 </div>
 
-<script>window.ET_BOOT = { baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?> };</script>
+<script>window.ET_BOOT = { baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?> };
+window.showReversed = <?= !empty($showReversed) ? 'true' : 'false' ?>;</script>
 <script src="<?= BASE_URL ?>assets/js/EmployeeTransaction.js"></script>
 
 <?php

@@ -34,21 +34,16 @@ class DamageModel extends Helper {
 
     public function getProductStockAndRate(int $productId, int $warehouseId): array
     {
-        $this->db->query('
-            SELECT COALESCE(qty, 0) AS available_qty
-            FROM warehouse_stock
-            WHERE product_id = :pid AND warehouse_id = :wid
-        ');
-        $this->db->bind(':pid', $productId);
-        $this->db->bind(':wid', $warehouseId);
-        $row = $this->db->single();
+        $balance = $this->Get_Product_Stock_Balance($productId, null, $warehouseId);
 
         $rate = $warehouseId > 0 && $productId > 0
             ? round($this->stockTransaction->getWarehouseAvgCost($warehouseId, $productId), 2)
             : 0.0;
 
         return [
-            'available_qty' => (float)($row['available_qty'] ?? 0),
+            'available_qty' => (float)($balance['available'] ?? 0),
+            'physical_qty'  => (float)($balance['physical'] ?? 0),
+            'pipeline_qty'  => (float)($balance['pending_out'] ?? 0),
             'price'         => $rate,
             'rate'          => $rate,
         ];
@@ -107,6 +102,14 @@ class DamageModel extends Helper {
             if ($lineItems === []) {
                 throw new Exception('Add at least one valid product line');
             }
+
+            $this->Assert_Warehouse_Lines_Available(array_map(static function (array $line) use ($warehouseId): array {
+                return [
+                    'product_id'   => (int)$line['product_id'],
+                    'warehouse_id' => $warehouseId,
+                    'qty'          => (float)$line['qty'],
+                ];
+            }, $lineItems));
 
             $totalValue = round($totalValue, 2);
 
@@ -202,12 +205,14 @@ class DamageModel extends Helper {
                    w.branch_id,
                    b.branch_name,
                    u.username AS created_by_name,
-                   ru.username AS reversed_by_name
+                   ru.username AS reversed_by_name,
+                   sr.return_code AS sales_return_code
             FROM damage_invoices di
             JOIN warehouses w ON di.warehouse_id = w.id
             JOIN branches b ON w.branch_id = b.id
             LEFT JOIN users u ON di.created_by = u.id
             LEFT JOIN users ru ON di.reversed_by = ru.id
+            LEFT JOIN sales_returns sr ON sr.id = di.sales_return_id
             WHERE di.id = :id
         ');
         $this->db->bind(':id', $id);
@@ -379,13 +384,16 @@ class DamageModel extends Helper {
                 di.is_reversed,
                 di.reverse_reason,
                 di.reversed_at,
+                di.sales_return_id,
                 w.warehouse_name,
                 b.branch_name,
-                u.username AS created_by_name
+                u.username AS created_by_name,
+                sr.return_code AS sales_return_code
             FROM damage_invoices di
             JOIN warehouses w ON di.warehouse_id = w.id
             JOIN branches b ON w.branch_id = b.id
             LEFT JOIN users u ON di.created_by = u.id
+            LEFT JOIN sales_returns sr ON sr.id = di.sales_return_id
         ';
 
         $where    = [];
@@ -414,6 +422,17 @@ class DamageModel extends Helper {
         if (!empty($filters['warehouse_id'])) {
             $where[] = 'di.warehouse_id = :warehouse_id';
             $bindings[':warehouse_id'] = (int)$filters['warehouse_id'];
+        }
+
+        if (!empty($filters['sales_return_id'])) {
+            $where[] = 'di.sales_return_id = :sales_return_id';
+            $bindings[':sales_return_id'] = (int)$filters['sales_return_id'];
+        }
+
+        if (!empty($filters['source']) && $filters['source'] === 'manual') {
+            $where[] = 'di.sales_return_id IS NULL';
+        } elseif (!empty($filters['source']) && $filters['source'] === 'return') {
+            $where[] = 'di.sales_return_id IS NOT NULL';
         }
 
         if (!empty($filters['status']) && $filters['status'] !== 'all') {

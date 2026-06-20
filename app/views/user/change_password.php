@@ -1,5 +1,6 @@
 <?php
 $title = 'Change Password';
+require_once __DIR__ . '/../../../core/PasswordPolicy.php';
 
 $content = '
 <div class="container-fluid py-4">
@@ -25,7 +26,7 @@ $content = '
                             <label class="form-label">New Password <span class="text-danger">*</span></label>
                             <input type="password" name="new_password" class="form-control" required>
                             <div class="form-text">
-                                Minimum 8 characters, must include at least one letter and one number.
+                                ' . htmlspecialchars(PasswordPolicy::requirementsText(), ENT_QUOTES) . '
                             </div>
                         </div>
 

@@ -68,7 +68,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         <span class="icon-wrap teal"><i class="fas fa-power-off"></i></span>
         Status
     </div>
-    <p class="small text-muted mb-2">Deactivating requires no active warehouses or employees on this branch.</p>
+    <p class="small text-muted mb-2">Deactivating requires no active warehouses, employees, open invoices, pending demands, or active users.</p>
     <div class="branch-status-toggle">
         <div class="status-option">
             <input type="radio" name="is_active" id="branchActive" value="1"

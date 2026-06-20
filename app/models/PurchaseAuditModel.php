@@ -32,6 +32,7 @@ class PurchaseAuditModel
             $this->sectionGrn(),
             $this->sectionPurchaseReturn(),
             $this->sectionSupplierPayments(),
+            $this->sectionGlJournalLinks(),
             $this->sectionLedger(),
             $this->sectionReports(),
         ];
@@ -60,6 +61,8 @@ class PurchaseAuditModel
             'ran_at'          => date('Y-m-d H:i:s'),
             'branch_id'       => $this->branchId,
             'negative_stocks' => $this->getNegativeStockRows(),
+            'missing_grn_journals'    => $this->getGrnsMissingJournalRows(),
+            'missing_return_journals' => $this->getReturnsMissingJournalRows(),
         ];
     }
 
@@ -121,6 +124,20 @@ class PurchaseAuditModel
               {$this->branchFilter('pr.branch_id')}
         ");
 
+        $activeNoGroup = $this->scalarCount("
+            SELECT COUNT(*) AS c FROM products p
+            WHERE p.is_active = 1 AND (p.group_id IS NULL OR p.group_id = 0)
+        ");
+
+        $activeNoPrice = $this->scalarCount("
+            SELECT COUNT(*) AS c FROM products p
+            WHERE p.is_active = 1
+              AND NOT EXISTS (
+                SELECT 1 FROM product_price_history ph
+                WHERE ph.product_id = p.id AND ph.default_rate > 0
+              )
+        ");
+
         return [
             'id'    => 'products',
             'title' => 'Products (purchase SKUs)',
@@ -128,6 +145,8 @@ class PurchaseAuditModel
             'items' => [
                 $this->item('prod_master', 'reference', 'Product master is shared', 'Same products table used for sales and purchase. PO/GRN/return lines reference product_id; rates on GRN update moving average via StockTransactionModel.', 'info', null, true),
                 $this->item('prod_active', 'reference', 'Prefer active products on new docs', 'Inactive products should not be added to new PO/GRN lines (UI should filter active SKUs).', 'info', null, true),
+                $this->item('prod_group', 'auto', 'Active products have a group', 'Every active SKU should have product_groups assigned (default China).', $activeNoGroup === 0 ? 'pass' : 'warn', $activeNoGroup === 0 ? 'OK' : "{$activeNoGroup} SKU(s) missing group"),
+                $this->item('prod_price_range', 'auto', 'Active products have price range', 'Active SKUs should have min/max/default in product_price_history.', $activeNoPrice === 0 ? 'pass' : 'warn', $activeNoPrice === 0 ? 'OK' : "{$activeNoPrice} SKU(s) without price"),
                 $this->item('prod_purchased_count', 'auto', 'Distinct products purchased (last 12 mo)', 'Count of unique product_id on received GRNs in period.', $purchasedSkus > 0 ? 'pass' : 'warn', $purchasedSkus > 0 ? "{$purchasedSkus} SKU(s)" : 'No received GRN lines in period'),
                 $this->item('prod_inactive_grn', 'auto', 'No inactive products on received GRNs', 'Received GRN lines should not reference deactivated products.', $inactiveOnGrn === 0 ? 'pass' : 'warn', $inactiveOnGrn === 0 ? 'OK' : "{$inactiveOnGrn} line(s) with inactive product"),
                 $this->item('prod_inactive_po', 'auto', 'No inactive products on PO lines', 'PO lines in period should reference active products.', $inactiveOnPo === 0 ? 'pass' : 'warn', $inactiveOnPo === 0 ? 'OK' : "{$inactiveOnPo} PO line(s) with inactive product"),
@@ -463,7 +482,7 @@ class PurchaseAuditModel
         ");
 
         if ($noJournal > 0) {
-            $this->repairMissingSupplierPaymentJournals($branch_id);
+            $this->repairMissingSupplierPaymentJournals($this->branchId);
             // Recompute after repair
             $noJournal = $this->scalarCount("
                 SELECT COUNT(*) AS c FROM supplier_payments sp
@@ -474,6 +493,8 @@ class PurchaseAuditModel
             ");
         }
 
+        $payRevUnreversed = $this->countReversedSupplierPaymentsWithUnreversedJournal();
+
         return [
             'id'    => 'payments',
             'title' => 'Supplier payments & due',
@@ -483,9 +504,84 @@ class PurchaseAuditModel
                 $this->item('pay_module', 'reference', 'SupplierTransaction module', 'Record payment/advance; optional branch demand settlement; reverse with reason. Now posts to GL journal too.', 'info', null, true, 'SupplierTransaction'),
                 $this->item('pay_ledger_row', 'auto', 'Payments have supplier_ledger row (last 12 mo)', 'Each active supplier_payment should create a supplier_ledger entry.', $paymentsNoLedger === 0 ? 'pass' : 'warn', $paymentsNoLedger === 0 ? 'OK' : "{$paymentsNoLedger} payment(s) without ledger row"),
                 $this->item('pay_journal', 'auto', 'Supplier payments have GL journal (last 12 mo)', 'postSupplierTransactionJournal (payment/advance/receive) — auto-repair on checklist load.', $noJournal === 0 ? 'pass' : 'warn', $noJournal === 0 ? 'OK' : "{$noJournal} payment(s) still missing journal"),
+                $this->item('pay_rev_journal', 'auto', 'Reversed payments reversed in GL', 'Reversed supplier_payment should reverse linked journal.', $payRevUnreversed === 0 ? 'pass' : 'warn', $payRevUnreversed === 0 ? 'OK' : "{$payRevUnreversed} reversed payment(s) with unreversed journal"),
                 $this->item('pay_activity', 'auto', 'Supplier payments in period', 'Informational: payments recorded in last 12 months.', $recentPayments > 0 ? 'pass' : 'info', $recentPayments > 0 ? "{$recentPayments} payment(s)" : 'No supplier payments in period (OK if paying later)'),
             ],
         ];
+    }
+
+    private function sectionGlJournalLinks(): array
+    {
+        return [
+            'id'    => 'gl_links',
+            'title' => 'GL journal link columns',
+            'icon'  => 'fa-link',
+            'items' => [
+                $this->item('gl_col_grn', 'reference', 'purchase_receives.journal_entry_id', 'GRN: Dr Inventory / Cr Supplier Payable. View on PurchaseReceive/details/{id}.', 'info', null, true, 'PurchaseReceive'),
+                $this->item('gl_col_return', 'reference', 'purchase_returns.journal_entry_id', 'Return: Dr Supplier Payable / Cr Inventory. View on PurchaseReturn/details/{id}.', 'info', null, true, 'PurchaseReturn'),
+                $this->item('gl_col_payment', 'reference', 'supplier_payments.journal_entry_id', 'Supplier payment/advance via SupplierTransaction module.', 'info', null, true, 'SupplierTransaction'),
+            ],
+        ];
+    }
+
+    private function countReversedSupplierPaymentsWithUnreversedJournal(): int
+    {
+        return $this->scalarCount("
+            SELECT COUNT(*) AS c
+            FROM supplier_payments sp
+            INNER JOIN journal_entries je ON je.id = sp.journal_entry_id
+            WHERE sp.is_reversed = 1
+              AND COALESCE(sp.journal_entry_id, 0) > 0
+              AND COALESCE(je.is_reversed, 0) = 0
+              {$this->branchFilter('sp.branch_id')}
+        ");
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getGrnsMissingJournalRows(int $limit = 15): array
+    {
+        try {
+            $this->db->query("
+                SELECT pr.id, pr.receive_code, pr.receive_date, pr.total_amount
+                FROM purchase_receives pr
+                WHERE pr.status = 'received'
+                  AND COALESCE(pr.journal_entry_id, 0) = 0
+                  AND pr.receive_date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+                  {$this->branchFilter('pr.branch_id')}
+                ORDER BY pr.receive_date DESC
+                LIMIT " . (int)$limit
+            );
+            return $this->db->resultSet() ?: [];
+        } catch (Exception $e) {
+            error_log('PurchaseAuditModel::getGrnsMissingJournalRows: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getReturnsMissingJournalRows(int $limit = 15): array
+    {
+        try {
+            $this->db->query("
+                SELECT prt.id, prt.return_code, prt.return_date, prt.total_amount, pr.receive_code
+                FROM purchase_returns prt
+                INNER JOIN purchase_receives pr ON pr.id = prt.purchase_receive_id
+                WHERE COALESCE(prt.is_reversed, 0) = 0
+                  AND COALESCE(prt.journal_entry_id, 0) = 0
+                  AND prt.return_date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+                  {$this->branchFilter('prt.branch_id')}
+                ORDER BY prt.return_date DESC
+                LIMIT " . (int)$limit
+            );
+            return $this->db->resultSet() ?: [];
+        } catch (Exception $e) {
+            error_log('PurchaseAuditModel::getReturnsMissingJournalRows: ' . $e->getMessage());
+            return [];
+        }
     }
 
     private function sectionLedger(): array

@@ -2,6 +2,8 @@
 $title = "Today's Sales";
 $filters = $filters ?? [];
 $branchName = $session_branch_name ?? 'Branch';
+$defaultTo = date('Y-m-d');
+$defaultFrom = date('Y-m-d', strtotime('-6 days'));
 ob_start();
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/sales-pos.css">
@@ -13,7 +15,7 @@ ob_start();
     <header class="sales-today-hero">
         <div>
             <h1><i class="fas fa-receipt me-2"></i>Today's Sales</h1>
-            <p>Manage invoices · payments · call it a day</p>
+            <p>Collect payments invoice by invoice · remove from list when done</p>
             <span class="sales-today-branch-tag"><i class="fas fa-map-marker-alt me-1"></i><?= htmlspecialchars($branchName, ENT_QUOTES) ?></span>
         </div>
         <div class="sales-today-hero-actions d-flex gap-2 flex-shrink-0">
@@ -26,6 +28,12 @@ ob_start();
             </a>
             <a href="<?= BASE_URL ?>sales/audit" class="btn btn-light btn-sm">
                 <i class="fas fa-clipboard-list"></i> Audit
+            </a>
+            <a href="<?= BASE_URL ?>SalesReturn" class="btn btn-outline-light btn-sm" title="Sales returns">
+                <i class="fas fa-undo-alt"></i> Returns
+            </a>
+            <a href="<?= BASE_URL ?>Damage" class="btn btn-outline-light btn-sm" title="Damage write-offs">
+                <i class="fas fa-heart-crack"></i> Damage
             </a>
             <button type="button" class="btn btn-light btn-sm collapsed" id="toggleSalesTodayFilters" data-bs-toggle="collapse" data-bs-target="#salesTodayFiltersCollapse" aria-expanded="false" aria-controls="salesTodayFiltersCollapse" title="Filters">
                 <i class="fas fa-filter me-1"></i>Filters
@@ -40,9 +48,9 @@ ob_start();
             <div class="sales-today-smart-panel">
                 <div class="sales-today-smart-label">Quick period</div>
                 <div class="sales-today-preset-row">
-                    <button type="button" class="sales-today-preset-btn active" data-preset="today">Today</button>
+                    <button type="button" class="sales-today-preset-btn" data-preset="today">Today</button>
                     <button type="button" class="sales-today-preset-btn" data-preset="yesterday">Yesterday</button>
-                    <button type="button" class="sales-today-preset-btn" data-preset="week">Last 7 days</button>
+                    <button type="button" class="sales-today-preset-btn active" data-preset="week">Last 7 days</button>
                     <button type="button" class="sales-today-preset-btn" data-preset="month">This month</button>
                     <button type="button" class="sales-today-preset-btn" data-preset="custom">Custom</button>
                 </div>
@@ -55,12 +63,15 @@ ob_start();
                            autocomplete="off">
                 </div>
 
-                <div class="sales-today-smart-label">Workflow <small class="text-muted fw-normal">(live counts)</small></div>
+                <div class="sales-today-smart-label">Filter <small class="text-muted fw-normal">(live counts)</small></div>
                 <div class="sales-today-status-chips">
                     <button type="button" class="sales-today-status-chip" data-status="all">
                         <span>All</span><span class="chip-count">0</span>
                     </button>
-                    <button type="button" class="sales-today-status-chip chip-urgent" data-status="open_pipeline">
+                    <button type="button" class="sales-today-status-chip chip-urgent" data-status="awaiting_payment">
+                        <span>Awaiting payment</span><span class="chip-count">0</span>
+                    </button>
+                    <button type="button" class="sales-today-status-chip" data-status="open_pipeline">
                         <span>In progress</span><span class="chip-count">0</span>
                     </button>
                     <button type="button" class="sales-today-status-chip" data-status="pending">
@@ -80,18 +91,18 @@ ob_start();
                         <div class="col-6 col-md-3">
                             <label class="form-label small mb-0">From</label>
                             <input type="date" id="filterDateFrom" class="form-control"
-                                   value="<?= htmlspecialchars($filters['date_from'] ?? date('Y-m-d'), ENT_QUOTES) ?>">
+                                   value="<?= htmlspecialchars($filters['date_from'] ?? $defaultFrom, ENT_QUOTES) ?>">
                         </div>
                         <div class="col-6 col-md-3">
                             <label class="form-label small mb-0">To</label>
                             <input type="date" id="filterDateTo" class="form-control"
-                                   value="<?= htmlspecialchars($filters['date_to'] ?? date('Y-m-d'), ENT_QUOTES) ?>">
+                                   value="<?= htmlspecialchars($filters['date_to'] ?? $defaultTo, ENT_QUOTES) ?>">
                         </div>
                         <div class="col-12 col-md-4">
                             <div class="form-check mt-2 mt-md-4">
                                 <input class="form-check-input" type="checkbox" id="filterSmartSort" checked>
                                 <label class="form-check-label small" for="filterSmartSort">
-                                    Priority sort — draft first, then godown, then completed
+                                    Priority sort — unpaid first, then oldest invoice date
                                 </label>
                             </div>
                         </div>
@@ -109,10 +120,10 @@ ob_start();
     <section class="sales-today-results-card">
         <div class="sales-today-results-head">
             <div class="fw-bold">
-                <span id="resultsCountNum">0</span> invoice(s)
+                <span id="resultsCountNum">0</span> invoice(s) on your collection list
             </div>
             <div class="d-flex flex-wrap gap-2">
-                <button type="button" class="btn btn-warning btn-sm" id="callItADayBtn">
+                <button type="button" class="btn btn-warning btn-sm" id="callItADayBtn" title="Remove selected invoices from your daily list">
                     <i class="fas fa-check-circle"></i> Call It A Day
                 </button>
                 <a href="<?= BASE_URL ?>sales/export" id="exportTodayBtn" class="btn btn-success btn-sm">
@@ -133,6 +144,8 @@ ob_start();
                             <th>Branch</th>
                             <th>Sales Person</th>
                             <th class="text-end">Total</th>
+                            <th class="text-end">Paid</th>
+                            <th class="text-end">Due</th>
                             <th>Status</th>
                             <th class="text-center">Actions</th>
                         </tr>
@@ -155,12 +168,12 @@ window.CSRF_TOKEN = <?= json_encode($_SESSION['csrf_token'] ?? '') ?>;
 window.SALES_TODAY_BASE = <?= json_encode(BASE_URL) ?>;
 window.SALES_RECEIPT_BASE = <?= json_encode(defined('PUBLIC_URL') ? PUBLIC_URL : BASE_URL) ?>;
 window.SALES_TODAY_BOOT = <?= json_encode([
-    'date_from'      => $filters['date_from'] ?? date('Y-m-d'),
-    'date_to'        => $filters['date_to'] ?? date('Y-m-d'),
+    'date_from'      => $filters['date_from'] ?? $defaultFrom,
+    'date_to'        => $filters['date_to'] ?? $defaultTo,
     'challan_status' => $filters['challan_status'] ?? 'all',
     'search'         => $filters['search'] ?? '',
     'smart_sort'     => !empty($filters['smart_sort']),
-    'date_preset'    => $filters['date_preset'] ?? 'today',
+    'date_preset'    => $filters['date_preset'] ?? 'week',
     'forceUrlParams' => !empty($_GET['date_from']) || !empty($_GET['challan_status']) || !empty($_GET['q']),
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
 </script>

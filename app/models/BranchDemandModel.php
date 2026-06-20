@@ -3,17 +3,17 @@
 
 require_once '../core/Database.php';
 require_once __DIR__ . '/../helpers/Helper.php';
-require_once 'StockTransactionModel.php';
+require_once __DIR__ . '/../services/Stock/StockService.php';
 require_once __DIR__ . '/../services/Branch/BranchIntercompanyService.php';
 require_once __DIR__ . '/../services/Accounting/JournalPostingService.php';
 
 class BranchDemandModel extends Helper {
 
-    protected $stockTransaction;
+    protected StockService $stock;
 
     public function __construct() {
         parent::__construct();
-        $this->stockTransaction = new StockTransactionModel();
+        $this->stock = new StockService($this->db);
     }
    
 
@@ -181,7 +181,8 @@ public function reverseDemand($id, $reason) {
 
             // Reverse: Put back to original sender warehouse
             if ($fromW) {
-                $this->stockTransaction->logMovement([
+                $this->stock->updateWarehouseStock($fromW, $pid, +$qty, $rate);
+                $this->stock->logMovement([
                     'product_id'     => $pid,
                     'warehouse_id'   => $fromW,
                     'qty'            => +$qty,
@@ -190,12 +191,12 @@ public function reverseDemand($id, $reason) {
                     'reference_id'   => $id,
                     'remarks'        => "Reversal - Returned to original warehouse"
                 ]);
-                $this->stockTransaction->updateWarehouseStock($fromW, $pid, +$qty, $rate);
             }
 
             // Reverse: Take out from receiver warehouse
             if ($toW) {
-                $this->stockTransaction->logMovement([
+                $this->stock->updateWarehouseStock($toW, $pid, -$qty, 0);
+                $this->stock->logMovement([
                     'product_id'     => $pid,
                     'warehouse_id'   => $toW,
                     'qty'            => -$qty,
@@ -204,7 +205,6 @@ public function reverseDemand($id, $reason) {
                     'reference_id'   => $id,
                     'remarks'        => "Reversal - Removed from receiver warehouse"
                 ]);
-                $this->stockTransaction->updateWarehouseStock($toW, $pid, -$qty, $rate);
             }
         }
 
@@ -273,83 +273,6 @@ public function deleteDraftDemand($id) {
     }
 }
 
-    private function getProductAvgCost($product_id, $warehouse_id) {
-        $this->db->query("SELECT avg_cost FROM warehouse_stock WHERE product_id = :pid AND warehouse_id = :wid");
-        $this->db->bind(':pid', $product_id);
-        $this->db->bind(':wid', $warehouse_id);
-        $row = $this->db->single();
-        return $row ? $row['avg_cost'] : 300.00; // fallback
-    }
-
-   
-
-     private function updateWarehouseStock($warehouse_id, $product_id, $qty_change, $rate) {
-        $this->db->query("
-            INSERT INTO warehouse_stock (warehouse_id, product_id, qty, avg_cost)
-            VALUES (:wid, :pid, :qty, :rate)
-            ON DUPLICATE KEY UPDATE 
-                qty = qty + :qty2,
-                avg_cost = CASE 
-                    WHEN (qty + :qty3) > 0 
-                    THEN (qty * avg_cost + :qty4 * :rate2) / (qty + :qty5)
-                    ELSE :rate3 
-                END
-        ");
-        $this->db->bind(':wid', $warehouse_id);
-        $this->db->bind(':pid', $product_id);
-        $this->db->bind(':qty', $qty_change);
-        $this->db->bind(':qty2', $qty_change);
-        $this->db->bind(':qty3', $qty_change);
-        $this->db->bind(':qty4', $qty_change);
-        $this->db->bind(':qty5', $qty_change);
-        $this->db->bind(':rate', $rate);
-        $this->db->bind(':rate2', $rate);
-        $this->db->bind(':rate3', $rate);
-        $this->db->execute();
-    }
-
-
-
-    /**
- * Get latest cost/sales rate from price history
- */
-private function getCurrentCostRate($product_id) {
-    $this->db->query("
-        SELECT sales_rate 
-        FROM product_price_history 
-        WHERE product_id = :pid 
-        ORDER BY effective_from DESC, created_at DESC 
-        LIMIT 1
-    ");
-    $this->db->bind(':pid', $product_id);
-    $row = $this->db->single();
-
-    return (float)($row['sales_rate'] ?? 0);
-}
-
-
-
-
-    private function updateBranchProductCost($branch_id, $product_id, $qty_change, $rate) {
-        $value = $qty_change * $rate;
-        $this->db->query("
-            INSERT INTO branch_product_cost (branch_id, product_id, total_qty, total_value)
-            VALUES (:bid, :pid, :qty, :val)
-            ON DUPLICATE KEY UPDATE 
-                total_qty = total_qty + :qty2,
-                total_value = total_value + :val2
-        ");
-        $this->db->bind(':bid', $branch_id);
-        $this->db->bind(':pid', $product_id);
-        $this->db->bind(':qty', $qty_change);
-        $this->db->bind(':val', $value);
-        $this->db->bind(':qty2', $qty_change);
-        $this->db->bind(':val2', $value);
-        $this->db->execute();
-    }
-
-
-
         // My Demands
     public function getMyDemands() {
         $bid = $_SESSION['branch_id'] ?? 1;
@@ -398,6 +321,7 @@ public function sendGoodsWithWarehouses($demand_id, $items) {
         $transferLines = [];
         $firstFromW = 0;
         $firstToW = 0;
+        $availabilityLines = [];
 
         foreach ($items as $item) {
             $pid         = (int)$item['product_id'];
@@ -409,11 +333,33 @@ public function sendGoodsWithWarehouses($demand_id, $items) {
                 throw new Exception("Invalid warehouse or quantity for product ID: $pid");
             }
 
-            // === Get Current Cost Rate ===
-            $rate = $this->getCurrentCostRate($pid);
+            $availabilityLines[] = [
+                'product_id'   => $pid,
+                'warehouse_id' => $fromW,
+                'qty'          => $qty,
+            ];
+        }
+
+        if ($availabilityLines === []) {
+            throw new Exception('No valid lines to send.');
+        }
+
+        $this->Assert_Warehouse_Lines_Available($availabilityLines);
+
+        foreach ($items as $item) {
+            $pid         = (int)$item['product_id'];
+            $qty         = (float)$item['qty'];
+            $fromW       = (int)$item['from_warehouse_id'];
+            $toW         = (int)$item['to_warehouse_id'];
+
+            if ($qty <= 0 || $fromW <= 0 || $toW <= 0) {
+                continue;
+            }
+
+            $rate = round($this->stock->getWarehouseAvgCost($fromW, $pid), 2);
 
             if ($rate <= 0) {
-                throw new Exception("Cost price not found or is zero for Product ID: $pid. Please update product price history first.");
+                throw new Exception("No warehouse cost for product ID {$pid} in sender warehouse. Receive stock first.");
             }
 
             $item_value = $qty * $rate;
@@ -445,7 +391,8 @@ public function sendGoodsWithWarehouses($demand_id, $items) {
             $demandItemId = (int)($demandItemRow['id'] ?? 0);
 
             // === Stock OUT from Sender ===
-            $this->stockTransaction->logMovement([
+            $this->stock->updateWarehouseStock($fromW, $pid, -$qty, 0);
+            $this->stock->logMovement([
                 'product_id'             => $pid,
                 'warehouse_id'           => $fromW,
                 'qty'                    => -$qty,
@@ -455,10 +402,10 @@ public function sendGoodsWithWarehouses($demand_id, $items) {
                 'branch_demand_item_id'  => $demandItemId > 0 ? $demandItemId : null,
                 'remarks'                => "Sent to another branch"
             ]);
-            $this->stockTransaction->updateWarehouseStock($fromW, $pid, -$qty, $rate);
 
             // === Stock IN to Receiver ===
-            $this->stockTransaction->logMovement([
+            $this->stock->updateWarehouseStock($toW, $pid, +$qty, $rate);
+            $this->stock->logMovement([
                 'product_id'             => $pid,
                 'warehouse_id'           => $toW,
                 'qty'                    => +$qty,
@@ -468,7 +415,6 @@ public function sendGoodsWithWarehouses($demand_id, $items) {
                 'branch_demand_item_id'  => $demandItemId > 0 ? $demandItemId : null,
                 'remarks'                => "Received from another branch"
             ]);
-            $this->stockTransaction->updateWarehouseStock($toW, $pid, +$qty, $rate);
 
             if ($firstFromW <= 0) {
                 $firstFromW = $fromW;
@@ -538,7 +484,7 @@ public function sendGoodsWithWarehouses($demand_id, $items) {
 
 
     /**
-     * Documentary warehouse transfer linked to demand (stock already moved via StockTransactionModel).
+     * Documentary warehouse transfer linked to demand (stock already moved via StockService).
      */
     private function createWarehouseTransferForDemand(
         int $demandId,

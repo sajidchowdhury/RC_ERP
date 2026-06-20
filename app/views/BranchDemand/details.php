@@ -4,6 +4,7 @@ $items = $items ?? [];
 $toWarehouses = $toWarehouses ?? [];
 $stockTrace = $stock_trace ?? [];
 $settlements = $settlements ?? [];
+$journal_blocks = $journal_blocks ?? [];
 $risk = $risk_flags ?? ['flags' => [], 'has_alerts' => false];
 
 $demandCode = $demand['demand_code'] ?? '';
@@ -23,6 +24,7 @@ ob_start();
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/purchase-index.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-demand.css">
+<link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 
 <div class="purch-index-app bd-demand-app container-fluid py-2">
     <header class="purch-index-hero">
@@ -37,6 +39,9 @@ ob_start();
                 <i class="fas fa-truck me-1"></i> Send goods
             </button>
             <?php endif; ?>
+            <a href="<?= BASE_URL ?>BranchDemand/checklist" class="btn btn-outline-light btn-sm" title="Inter-branch GL audit">
+                <i class="fas fa-clipboard-check"></i>
+            </a>
             <a href="<?= BASE_URL ?>BranchDemand/weekly" class="btn btn-outline-light btn-sm">
                 <i class="fas fa-chart-line me-1"></i> Weekly control
             </a>
@@ -168,10 +173,16 @@ ob_start();
                             <select class="form-select form-select-sm from-warehouse" required>
                                 <option value="">— Select —</option>
                                 <?php foreach (($item['from_warehouses'] ?? []) as $wh):
-                                    $stock = (float)($wh['qty'] ?? $wh['available_qty'] ?? $wh['physical_qty'] ?? 0);
-                                    ?>
-                                <option value="<?= (int)($wh['id'] ?? 0) ?>" data-stock="<?= $stock ?>">
-                                    <?= htmlspecialchars($wh['warehouse_name'] ?? '', ENT_QUOTES) ?> (<?= number_format($stock, 2) ?>)
+                                    $avail = (float)($wh['available_qty'] ?? 0);
+                                    $physical = (float)($wh['physical_qty'] ?? $avail);
+                                    $pipeline = (float)($wh['pipeline_qty'] ?? max(0, $physical - $avail));
+                                    $stockLabel = number_format($avail, 2) . ' avail';
+                                    if ($pipeline > 0.0001) {
+                                        $stockLabel .= ' (' . number_format($physical, 2) . ' phys, ' . number_format($pipeline, 2) . ' sales hold)';
+                                    }
+                                ?>
+                                <option value="<?= (int)($wh['id'] ?? 0) ?>" data-stock="<?= $avail ?>">
+                                    <?= htmlspecialchars($wh['warehouse_name'] ?? '', ENT_QUOTES) ?> (<?= $stockLabel ?>)
                                 </option>
                                 <?php endforeach; ?>
                             </select>
@@ -268,6 +279,8 @@ ob_start();
         </div>
     </section>
     <?php endif; ?>
+
+    <?php include __DIR__ . '/../partials/sales_gl_journal_blocks.php'; ?>
 
     <?php if (!empty($stockTrace)): ?>
     <section class="bd-section-card">

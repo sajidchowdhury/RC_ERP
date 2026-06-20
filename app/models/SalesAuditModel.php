@@ -44,6 +44,7 @@ class SalesAuditModel extends Helper
             $this->sectionChallan(),
             $this->sectionSalesReturn(),
             $this->sectionCustomerPayments(),
+            $this->sectionGlJournalLinks(),
             $this->sectionLedger($reconFull),
             $this->sectionGlReconciliation($reconFull),
             $this->sectionReports(),
@@ -939,13 +940,18 @@ class SalesAuditModel extends Helper
               )
         ");
 
+        $staleDraftDays = defined('SALES_STALE_DRAFT_DAYS') ? max(1, (int)SALES_STALE_DRAFT_DAYS) : 14;
+
         $draftOld = $this->scalarCount("
             SELECT COUNT(*) AS c FROM sales_invoices si
             WHERE si.is_reversed = 0
               AND si.status = 'draft'
-              AND si.created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+              AND si.godown_issued_at IS NULL
+              AND si.created_at < DATE_SUB(CURDATE(), INTERVAL {$staleDraftDays} DAY)
               {$this->branchFilter('si.branch_id')}
         ");
+
+        $invRevUnreversed = $this->countReversedDocsWithUnreversedJournal('sales_invoices', 'si');
 
         return [
             'id'    => 'invoice',
@@ -957,8 +963,9 @@ class SalesAuditModel extends Helper
                 $this->item('inv_cart', 'reference', 'Draft carts (session)', 'sales_draft_carts per customer until invoice saved.', 'info', null, true),
                 $this->item('inv_journal_draft', 'auto', 'Draft invoices without GL journal', 'Draft may lack journal if created before GL was enabled — informational only.', 'info', $draftNoJournal === 0 ? 'None' : "{$draftNoJournal} draft(s)"),
                 $this->item('inv_journal', 'auto', 'Posted invoices have GL journal (last 12 mo)', 'Challan/godown invoices or any with customer_ledger should have journal_entry_id (auto-repair runs on checklist load).', $noJournal === 0 ? 'pass' : 'warn', $noJournal === 0 ? 'OK' : "{$noJournal} invoice(s) still missing journal"),
+                $this->item('inv_rev_journal', 'auto', 'Reversed invoices reversed in GL', 'Deleted/reversed invoice should reverse linked sales_invoice journal.', $invRevUnreversed === 0 ? 'pass' : 'warn', $invRevUnreversed === 0 ? 'OK' : "{$invRevUnreversed} reversed invoice(s) with unreversed journal"),
                 $this->item('inv_ledger', 'auto', 'Invoices have customer_ledger row', 'Running balance updated on invoice post.', $noLedger === 0 ? 'pass' : 'warn', $noLedger === 0 ? 'OK' : "{$noLedger} invoice(s) without customer_ledger"),
-                $this->item('inv_stale_draft', 'auto', 'Stale draft invoices (>30 days)', 'Drafts left open — review or delete.', $draftOld === 0 ? 'pass' : 'warn', $draftOld === 0 ? 'OK' : "{$draftOld} old draft(s)"),
+                $this->item('inv_stale_draft', 'auto', "Stale draft invoices (>{$staleDraftDays} days)", 'Drafts left open — auto-cancel on Today\'s Sales or run cancel_stale_drafts.', $draftOld === 0 ? 'pass' : 'warn', $draftOld === 0 ? 'OK' : "{$draftOld} old draft(s)"),
                 $this->item('inv_today', 'reference', 'Today invoices workspace', 'sales/today — payments, call-a-day, filters.', 'info', null, true, 'sales/today'),
             ],
         ];
@@ -1000,12 +1007,14 @@ class SalesAuditModel extends Helper
               )
         ");
 
+        $staleDraftDays = defined('SALES_STALE_DRAFT_DAYS') ? max(1, (int)SALES_STALE_DRAFT_DAYS) : 14;
+
         $draftStaleGodown = $this->scalarCount("
             SELECT COUNT(*) AS c FROM sales_invoices si
             WHERE si.is_reversed = 0
               AND si.status = 'draft'
               AND si.godown_issued_at IS NULL
-              AND si.created_at < DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+              AND si.created_at < DATE_SUB(CURDATE(), INTERVAL {$staleDraftDays} DAY)
               {$this->branchFilter('si.branch_id')}
         ");
 
@@ -1040,8 +1049,8 @@ class SalesAuditModel extends Helper
                 $this->item(
                     'gd_draft_stale',
                     'auto',
-                    'Stale draft invoices (>14 days)',
-                    'Drafts left open without godown — cancel/delete or complete godown.',
+                    "Stale draft invoices (>{$staleDraftDays} days)",
+                    'Drafts holding pipeline — auto-cancelled on Today\'s Sales or use Release pipeline.',
                     $draftStaleGodown === 0 ? 'pass' : 'warn',
                     $draftStaleGodown === 0 ? 'OK' : "{$draftStaleGodown} old draft(s)",
                     false,
@@ -1102,6 +1111,8 @@ class SalesAuditModel extends Helper
               {$this->branchFilterOnChallan()}
         ");
 
+        $missingAdjJournal = $this->countChallansMissingAdjustmentJournal();
+
         return [
             'id'    => 'challan',
             'title' => 'Delivery challan',
@@ -1112,7 +1123,8 @@ class SalesAuditModel extends Helper
                 $this->item('ch_reverse', 'reference', 'Reverse challan', 'Restores stock at issue rate, reverses COGS + transport GL + customer_ledger adjustment, restores invoice transport/total (Phase 3).', 'info', null, true),
                 $this->item('ch_missing_stock', 'auto', 'Completed challans have stock OUT', 'Active challans on challan_completed invoices need sales_challan movements.', $noStock === 0 ? 'pass' : 'fail', $noStock === 0 ? 'OK' : "{$noStock} challan(s) without stock OUT"),
                 $this->item('ch_missing_cogs', 'auto', 'Completed challans have COGS journal', 'When stock was issued (sales_challan OUT), Dr COGS / Cr inventory should be posted — auto-repair runs on checklist load.', $noJournal === 0 ? 'pass' : 'warn', $noJournal === 0 ? 'OK' : "{$noJournal} challan(s) still missing COGS journal"),
-                $this->item('ch_rev_journal', 'auto', 'Reversed challans reversed in GL', 'Reversed challan should reverse linked journal.', $cancelNoRev === 0 ? 'pass' : 'warn', $cancelNoRev === 0 ? 'OK' : "{$cancelNoRev} reversed challan(s) with unreversed journal"),
+                $this->item('ch_adj_journal', 'auto', 'Transport adjustments have GL journal', 'sales_challans.adjustment_journal_entry_id when transport_adjustment ≠ 0.', $missingAdjJournal === 0 ? 'pass' : 'warn', $missingAdjJournal === 0 ? 'OK' : "{$missingAdjJournal} challan(s) missing adjustment journal"),
+                $this->item('ch_rev_journal', 'auto', 'Reversed challans reversed in GL', 'Reversed challan should reverse linked COGS and adjustment journals.', $cancelNoRev === 0 ? 'pass' : 'warn', $cancelNoRev === 0 ? 'OK' : "{$cancelNoRev} reversed challan(s) with unreversed journal"),
             ],
         ];
     }
@@ -1163,6 +1175,8 @@ class SalesAuditModel extends Helper
               {$this->branchFilterViaSalesReturn()}
         ");
 
+        $srRevUnreversed = $this->countReversedDocsWithUnreversedJournal('sales_returns', 'sr');
+
         return [
             'id'    => 'return',
             'title' => 'Sales return',
@@ -1174,6 +1188,7 @@ class SalesAuditModel extends Helper
                 $this->item('sr_pending', 'auto', 'Pending returns >14 days', 'Awaiting warehouse confirm — follow up.', $pendingOld === 0 ? 'pass' : 'warn', $pendingOld === 0 ? 'OK' : "{$pendingOld} pending return(s)"),
                 $this->item('sr_stock_in', 'auto', 'Completed Good returns have stock IN', 'Positive sales_return stock_transactions.', $noStockIn === 0 ? 'pass' : 'fail', $noStockIn === 0 ? 'OK' : "{$noStockIn} return(s) missing stock IN"),
                 $this->item('sr_journal', 'auto', 'Completed returns have journal', 'postSalesReturn on warehouse confirm — auto-repair runs on checklist load.', $noJournal === 0 ? 'pass' : 'warn', $noJournal === 0 ? 'OK' : "{$noJournal} return(s) still missing journal"),
+                $this->item('sr_rev_journal', 'auto', 'Reversed returns reversed in GL', 'Reversed return should reverse linked sales_return journal.', $srRevUnreversed === 0 ? 'pass' : 'warn', $srRevUnreversed === 0 ? 'OK' : "{$srRevUnreversed} reversed return(s) with unreversed journal"),
                 $this->item('sr_rev_flag', 'auto', 'Reversal stock matches is_reversed', 'sales_return_reversal requires is_reversed=1.', $reversedNoFlag === 0 ? 'pass' : 'warn', $reversedNoFlag === 0 ? 'OK' : "{$reversedNoFlag} return(s) mismatch"),
             ],
         ];
@@ -1207,6 +1222,8 @@ class SalesAuditModel extends Helper
               {$this->branchFilter('cp.branch_id')}
         ");
 
+        $payRevUnreversed = $this->countReversedPaymentsWithUnreversedJournal();
+
         return [
             'id'    => 'payments',
             'title' => 'Customer payments & receivable',
@@ -1217,9 +1234,83 @@ class SalesAuditModel extends Helper
                 $this->item('pay_acct', 'reference', 'CustomerTransaction module', 'Additional customer receipts/adjustments in accounting.', 'info', null, true, 'CustomerTransaction'),
                 $this->item('pay_ledger', 'auto', 'Payments have customer_ledger row', 'Each active payment should update running balance.', $noLedger === 0 ? 'pass' : 'warn', $noLedger === 0 ? 'OK' : "{$noLedger} payment(s) without ledger"),
                 $this->item('pay_journal', 'auto', 'Payments have GL journal (last 12 mo)', 'postCustomerTransactionJournal by type (receive/payment/discount/write_off) — auto-repair on checklist load.', $noJournal === 0 ? 'pass' : 'warn', $noJournal === 0 ? 'OK' : "{$noJournal} payment(s) still missing journal"),
+                $this->item('pay_rev_journal', 'auto', 'Reversed payments reversed in GL', 'Reversed customer_payment should reverse linked journal.', $payRevUnreversed === 0 ? 'pass' : 'warn', $payRevUnreversed === 0 ? 'OK' : "{$payRevUnreversed} reversed payment(s) with unreversed journal"),
                 $this->item('pay_activity', 'auto', 'Customer payments in period', 'Informational count.', $recent > 0 ? 'pass' : 'info', $recent > 0 ? "{$recent} payment(s)" : 'No payments in period'),
             ],
         ];
+    }
+
+    private function sectionGlJournalLinks(): array
+    {
+        return [
+            'id'    => 'gl_links',
+            'title' => 'GL journal link columns',
+            'icon'  => 'fa-link',
+            'items' => [
+                $this->item('gl_col_invoice', 'reference', 'sales_invoices.journal_entry_id', 'Invoice AR + revenue journal from postSalesInvoice. View on sales/show/{id}.', 'info', null, true, 'sales/today'),
+                $this->item('gl_col_challan_cogs', 'reference', 'sales_challans.journal_entry_id', 'Challan COGS journal (Dr COGS / Cr inventory). View on challan/details/{id}.', 'info', null, true, 'challan'),
+                $this->item('gl_col_challan_adj', 'reference', 'sales_challans.adjustment_journal_entry_id', 'Transport/total adjustment at challan finalize (sales_invoice_adjustment).', 'info', null, true, 'challan'),
+                $this->item('gl_col_return', 'reference', 'sales_returns.journal_entry_id', 'Return revenue + inventory restore on warehouse confirm. View on SalesReturn/details/{id}.', 'info', null, true, 'SalesReturn'),
+                $this->item('gl_col_payment', 'reference', 'customer_payments.journal_entry_id', 'Receipt/refund/discount/write-off from sales/today or CustomerTransaction.', 'info', null, true, 'CustomerTransaction'),
+            ],
+        ];
+    }
+
+    private function countReversedDocsWithUnreversedJournal(string $table, string $alias): int
+    {
+        if (!in_array($table, ['sales_invoices', 'sales_returns'], true)) {
+            return 0;
+        }
+
+        $branchSql = $table === 'sales_returns'
+            ? $this->branchFilterViaSalesReturn()
+            : $this->branchFilter("{$alias}.branch_id");
+
+        return $this->scalarCount("
+            SELECT COUNT(*) AS c
+            FROM {$table} {$alias}
+            INNER JOIN journal_entries je ON je.id = {$alias}.journal_entry_id
+            WHERE {$alias}.is_reversed = 1
+              AND COALESCE({$alias}.journal_entry_id, 0) > 0
+              AND COALESCE(je.is_reversed, 0) = 0
+              {$branchSql}
+        ");
+    }
+
+    private function countReversedPaymentsWithUnreversedJournal(): int
+    {
+        return $this->scalarCount("
+            SELECT COUNT(*) AS c
+            FROM customer_payments cp
+            INNER JOIN journal_entries je ON je.id = cp.journal_entry_id
+            WHERE cp.is_reversed = 1
+              AND COALESCE(cp.journal_entry_id, 0) > 0
+              AND COALESCE(je.is_reversed, 0) = 0
+              {$this->branchFilter('cp.branch_id')}
+        ");
+    }
+
+    private function countChallansMissingAdjustmentJournal(): int
+    {
+        try {
+            $this->db->query("SHOW COLUMNS FROM sales_challans LIKE 'transport_adjustment'");
+            if (!$this->db->single()) {
+                return 0;
+            }
+        } catch (Exception $e) {
+            return 0;
+        }
+
+        return $this->scalarCount("
+            SELECT COUNT(*) AS c
+            FROM sales_challans sc
+            INNER JOIN sales_invoices si ON si.id = sc.sales_invoice_id
+            WHERE COALESCE(sc.is_reversed, 0) = 0
+              AND ABS(COALESCE(sc.transport_adjustment, 0)) > 0.01
+              AND COALESCE(sc.adjustment_journal_entry_id, 0) = 0
+              AND sc.challan_date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+              {$this->branchFilter('si.branch_id')}
+        ");
     }
 
     private function sectionLedger(array $reconFull = []): array
@@ -1252,7 +1343,7 @@ class SalesAuditModel extends Helper
                 $this->item('gl_cogs_ok', 'auto', 'COGS ledger configured', 'Requires active ledger with ledger_nature cogs.', $cogs > 0 ? 'pass' : 'fail', $cogs > 0 ? 'OK' : 'Missing — challan COGS fails'),
                 $this->item('gl_inv_ok', 'auto', 'Inventory ledger configured', 'Requires active ledger with ledger_nature inventory.', $inv > 0 ? 'pass' : 'fail', $inv > 0 ? 'OK' : 'Missing'),
                 $this->item('cl_balance', 'auto', 'Customer ledger running_balance integrity', 'Last row balance vs SUM(debit−credit) per customer (tolerance 0.02).', $mismatchCount === 0 ? 'pass' : 'fail', $mismatchCount === 0 ? 'OK' : "{$mismatchCount} customer(s) mismatch"),
-                $this->item('cl_ar_gl', 'auto', 'AR sub-ledger vs GL control', 'Sum of customer latest balances vs net customer_receivable journal lines.', $arDiff <= $arTol ? 'pass' : 'warn', $arDiff <= $arTol ? 'OK' : 'Diff ' . number_format($arDiff, 2), false, 'sales/reconcile'),
+                $this->item('cl_ar_gl', 'auto', 'AR sub-ledger vs GL control', 'Sum of customer latest balances vs net customer_receivable journal lines.', $arDiff <= $arTol ? 'pass' : 'warn', $arDiff <= $arTol ? 'OK' : 'Diff ' . number_format($arDiff, 2), false, 'Reconciliation/index'),
                 $this->item('cl_branch', 'auto', 'customer_ledger.branch_id populated', 'New rows set branch_id; run migration 013 to backfill history.', $nullBranchLedger === 0 ? 'pass' : 'warn', $nullBranchLedger === 0 ? 'OK' : "{$nullBranchLedger} row(s) without branch_id"),
                 $this->item('pay_seq', 'reference', 'Payment codes', 'PAY-YYYYMMDD-#### via document_sequences (customer_payment).', 'info', null, true),
                 $this->item('gl_discount', 'auto', 'Sales discount ledger (optional)', 'When configured (sales_discount), invoice discounts post to contra-revenue instead of net revenue only.', $this->scalarCount("SELECT COUNT(*) AS c FROM ledgers WHERE ledger_nature = 'sales_discount' AND is_active = 1") > 0 ? 'pass' : 'info', $this->scalarCount("SELECT COUNT(*) AS c FROM ledgers WHERE ledger_nature = 'sales_discount' AND is_active = 1") > 0 ? 'Configured' : 'Optional — migration 019 seeds L-1010'),
@@ -1275,9 +1366,9 @@ class SalesAuditModel extends Helper
             'title' => 'GL reconciliation (Phase 5)',
             'icon'  => 'fa-scale-balanced',
             'items' => [
-                $this->item('recon_ar', 'auto', 'AR sub-ledger vs GL', 'Latest customer balances vs customer_receivable journal net.', !empty($ar['within_tolerance']) ? 'pass' : 'warn', !empty($ar['within_tolerance']) ? 'OK' : 'Diff ' . number_format($arDiff, 2), false, 'sales/reconcile'),
-                $this->item('recon_inv', 'auto', 'Inventory GL vs warehouse valuation', 'sum(qty×avg_cost) vs inventory ledger net (cumulative GL).', !empty($inv['within_tolerance']) ? 'pass' : 'warn', !empty($inv['within_tolerance']) ? 'OK' : 'Diff ' . number_format($invDiff, 2), false, 'sales/reconcile'),
-                $this->item('recon_cogs', 'auto', 'COGS tie-out (period)', 'Challan stock OUT vs COGS debits on sales_challan journals.', !empty($cogs['within_tolerance']) ? 'pass' : 'warn', !empty($cogs['within_tolerance']) ? 'OK' : 'Diff ' . number_format($cogsDiff, 2) . ' (' . ($cogs['from_date'] ?? '') . '–' . ($cogs['to_date'] ?? '') . ')', false, 'sales/reconcile'),
+                $this->item('recon_ar', 'auto', 'AR sub-ledger vs GL', 'Latest customer balances vs customer_receivable journal net.', !empty($ar['within_tolerance']) ? 'pass' : 'warn', !empty($ar['within_tolerance']) ? 'OK' : 'Diff ' . number_format($arDiff, 2), false, 'Reconciliation/index'),
+                $this->item('recon_inv', 'auto', 'Inventory GL vs warehouse valuation', 'sum(qty×avg_cost) vs inventory ledger net (cumulative GL).', !empty($inv['within_tolerance']) ? 'pass' : 'warn', !empty($inv['within_tolerance']) ? 'OK' : 'Diff ' . number_format($invDiff, 2), false, 'Reconciliation/index'),
+                $this->item('recon_cogs', 'auto', 'COGS tie-out (period)', 'Challan stock OUT vs COGS debits on sales_challan journals.', !empty($cogs['within_tolerance']) ? 'pass' : 'warn', !empty($cogs['within_tolerance']) ? 'OK' : 'Diff ' . number_format($cogsDiff, 2) . ' (' . ($cogs['from_date'] ?? '') . '–' . ($cogs['to_date'] ?? '') . ')', false, 'Reconciliation/index'),
                 $this->item('recon_job', 'reference', 'Scheduled reconciliation', 'Cron: php database/scripts/run_gl_reconciliation.php — alerts in logs/reconciliation_alerts.log', 'info', null, true),
             ],
         ];
@@ -1290,6 +1381,7 @@ class SalesAuditModel extends Helper
             ['id' => 'rpt_sales_history', 'title' => 'Sales history', 'route' => 'Report/SalesHistory', 'view' => 'SalesHistory', 'desc' => 'Invoice-level sales by period.'],
             ['id' => 'rpt_return_hist', 'title' => 'Sales return history', 'route' => 'Report/SalesReturnHistory', 'view' => 'SalesReturnHistory', 'desc' => 'Customer returns by period.'],
             ['id' => 'rpt_movement', 'title' => 'Product movement', 'route' => 'Report/ProductMovement', 'view' => 'ProductMovement', 'desc' => 'Includes sales_challan / return types.'],
+            ['id' => 'rpt_margin', 'title' => 'Gross margin by invoice/product', 'route' => 'Report/grossMargin', 'view' => 'GrossMargin', 'desc' => 'Revenue vs COGS from challan; delivery or invoice date basis.'],
         ];
 
         foreach ($implemented as $r) {
@@ -1311,7 +1403,6 @@ class SalesAuditModel extends Helper
             ['id' => 'rpt_godown_pending', 'title' => 'Godown pending register', 'desc' => 'Invoices awaiting dispatch/challan. (Planned)'],
             ['id' => 'rpt_challan_reg', 'title' => 'Challan register (line detail)', 'desc' => 'Delivered qty, warehouse, COGS per challan. (Planned)'],
             ['id' => 'rpt_cust_stmt', 'title' => 'Customer statement (GL + ledger)', 'desc' => 'Opening, invoices, returns, payments, closing. (Planned)'],
-            ['id' => 'rpt_margin', 'title' => 'Gross margin by invoice/product', 'desc' => 'Revenue vs COGS from challan. (Planned)'],
             ['id' => 'rpt_credit', 'title' => 'Credit limit exceptions', 'desc' => 'Overrides logged in sales audit. (Planned)'],
         ];
 

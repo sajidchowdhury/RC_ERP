@@ -11,7 +11,9 @@ require_once __DIR__ . '/../services/Sales/SalesInvoiceService.php';
 require_once __DIR__ . '/../services/Sales/SalesPaymentService.php';
 require_once __DIR__ . '/../services/Notification/FcmTokenService.php';
 require_once __DIR__ . '/../services/Notification/SalesNotificationService.php';
+require_once __DIR__ . '/../services/Notification/SalesTelegramNotifier.php';
 require_once __DIR__ . '/../services/Accounting/ReconciliationService.php';
+require_once __DIR__ . '/../helpers/SalesGlAuditHelper.php';
 
 class SalesController extends BaseController {
 
@@ -89,6 +91,28 @@ class SalesController extends BaseController {
         $this->sendJson($this->model->searchProductsWithStock($term, $branch_id));
     }
 
+    /**
+     * Exact product_code match for barcode scanners.
+     */
+    public function product_by_code() {
+        $this->guardJsonApi('sales.product_by_code', 120, 60);
+        $code = trim((string)($_GET['code'] ?? ''));
+        $branch_id = $this->model->resolveBranchIdForRead((int)($_GET['branch_id'] ?? 0));
+
+        if ($code === '') {
+            $this->sendJson(['status' => 'error', 'message' => 'Product code required']);
+            return;
+        }
+
+        $product = $this->model->getProductByExactCode($code, $branch_id);
+        if (!$product) {
+            $this->sendJson(['status' => 'not_found', 'message' => 'No product with this code']);
+            return;
+        }
+
+        $this->sendJson(['status' => 'success', 'data' => $product]);
+    }
+
 
 
     public function get_branch() {
@@ -163,7 +187,40 @@ class SalesController extends BaseController {
     public function load_cart() {
         $this->validateCSRF();
         $customer_id = $_POST['customer_id'] ?? 0;
-        $this->sendJson($this->cartService->loadCart($customer_id));
+        $branch_id = (int)($_POST['branch_id'] ?? $_SESSION['branch_id'] ?? 0);
+        $excludeInvoiceId = !empty($_POST['exclude_invoice_id']) ? (int)$_POST['exclude_invoice_id'] : null;
+        $this->sendJson($this->cartService->loadCart($customer_id, $branch_id, $excludeInvoiceId));
+    }
+
+    public function validate_cart() {
+        $this->validateCSRF();
+        $this->sendJson($this->cartService->validateCartForSubmit($_POST));
+    }
+
+    public function hydrate_edit_cart() {
+        $this->validateCSRF();
+        $invoiceId = (int)($_POST['invoice_id'] ?? 0);
+        $customerId = (int)($_POST['customer_id'] ?? 0);
+
+        if ($invoiceId <= 0 || $customerId <= 0) {
+            $this->sendJson(['status' => 'error', 'message' => 'Invalid invoice or customer.']);
+        }
+
+        $invoice = $this->invoiceService->getInvoiceForEdit($invoiceId);
+        if (!$invoice) {
+            $this->sendJson(['status' => 'error', 'message' => 'Invoice not found or cannot be edited']);
+        }
+
+        $blockReason = $this->invoiceService->getSalesEditBlockReason($invoice);
+        if ($blockReason !== '') {
+            $this->sendJson(['status' => 'error', 'message' => $blockReason]);
+        }
+
+        if ((int)($invoice['customer_id'] ?? 0) !== $customerId) {
+            $this->sendJson(['status' => 'error', 'message' => 'Customer does not match this invoice.']);
+        }
+
+        $this->sendJson($this->cartService->hydrateEditCart($customerId, $invoice['items'] ?? []));
     }
 
     public function list_draft_carts() {
@@ -232,7 +289,9 @@ class SalesController extends BaseController {
                     (float)($_POST['total_amount'] ?? 0)
                 );
 
-
+                SalesTelegramNotifier::safe(function () use ($result) {
+                    (new SalesTelegramNotifier())->notifyInvoiceCreated((int)$result['invoice_id']);
+                });
             }
 
             if ($result['status'] === 'success' && !empty($result['credit_limit_override_used'])) {
@@ -281,11 +340,14 @@ class SalesController extends BaseController {
 
     // Today & Management
 public function today() {
+    $defaultTo = date('Y-m-d');
+    $defaultFrom = date('Y-m-d', strtotime('-6 days'));
+
     $filters = [
-        'date_from'      => $_GET['date_from'] ?? date('Y-m-d'),
-        'date_to'        => $_GET['date_to'] ?? date('Y-m-d'),
+        'date_from'      => $_GET['date_from'] ?? $defaultFrom,
+        'date_to'        => $_GET['date_to'] ?? $defaultTo,
         'challan_status' => $_GET['challan_status'] ?? 'all',
-        'date_preset'    => $_GET['preset'] ?? 'today',
+        'date_preset'    => $_GET['preset'] ?? 'week',
         'search'         => trim($_GET['q'] ?? ''),
         'smart_sort'     => ($_GET['smart_sort'] ?? '1') !== '0',
     ];
@@ -304,13 +366,32 @@ public function today() {
 
     public function today_filter_summary() {
         $this->guardJsonApi('sales.today_filter_summary', 120, 60);
+        $defaultTo = date('Y-m-d');
+        $defaultFrom = date('Y-m-d', strtotime('-6 days'));
         $filters = [
-            'date_from' => $_GET['date_from'] ?? date('Y-m-d'),
-            'date_to'   => $_GET['date_to'] ?? date('Y-m-d'),
+            'date_from' => $_GET['date_from'] ?? $defaultFrom,
+            'date_to'   => $_GET['date_to'] ?? $defaultTo,
             'search'    => trim($_GET['search'] ?? ''),
             'skip_default_today' => true,
         ];
         $this->sendJson($this->invoiceService->getTodayFilterSummary($filters));
+    }
+
+    /**
+     * Cancel stale draft invoices (releases pipeline). Admin/manager only — optional cron; not used on Today's Sales UI.
+     */
+    public function cancel_stale_drafts()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->sendJson(['status' => 'error', 'message' => 'POST required']);
+            return;
+        }
+        $this->guardJsonApi('sales.cancel_stale_drafts', 30, 60);
+        $days = isset($_POST['days']) ? max(1, (int)$_POST['days']) : null;
+        $branchId = Helper::sessionBranchId() ?: null;
+        $result = $this->model->cancelStaleDraftInvoices($days, $branchId);
+        $result['remaining'] = $this->model->countStaleDraftInvoices($days, $branchId);
+        $this->sendJson($result);
     }
 
     /**
@@ -329,9 +410,12 @@ public function today() {
         $orderDir         = $_GET['order'][0]['dir'] ?? 'desc';
         $searchValue      = trim($_GET['search']['value'] ?? '');
 
+        $defaultTo = date('Y-m-d');
+        $defaultFrom = date('Y-m-d', strtotime('-6 days'));
+
         $filters = [
-            'date_from'      => $_GET['date_from'] ?? date('Y-m-d'),
-            'date_to'        => $_GET['date_to'] ?? date('Y-m-d'),
+            'date_from'      => $_GET['date_from'] ?? $defaultFrom,
+            'date_to'        => $_GET['date_to'] ?? $defaultTo,
             'challan_status' => $_GET['challan_status'] ?? 'all',
             'smart_sort'     => ($_GET['smart_sort'] ?? '1') !== '0',
             'skip_default_today' => true,
@@ -499,6 +583,13 @@ public function today() {
                     'payment_mode'     => $_POST['payment_mode'] ?? null,
                     'journal_entry_id' => $result['journal_entry_id'] ?? null,
                 ]);
+
+                $paymentId = (int)($result['payment_id'] ?? 0);
+                $invoiceId = (int)($result['invoice_id'] ?? $_POST['invoice_id'] ?? 0);
+                SalesTelegramNotifier::safe(function () use ($paymentId, $invoiceId) {
+                    (new SalesTelegramNotifier())->notifyTodayInvoicePayment($paymentId, $invoiceId);
+                });
+
                 $result['success'] = true;
             }
             $this->sendJson($result);
@@ -545,6 +636,16 @@ public function today() {
         ]);
     }
 
+    /**
+     * Go-live checklist for managers, finance, warehouse, and IT.
+     * URL: sales/go_live_checklist
+     */
+    public function go_live_checklist() {
+        $this->view('sales/go_live_checklist', [
+            'title' => 'Sales Go-Live Checklist',
+        ]);
+    }
+
     public function audit() {
         $this->view('sales/audit', [
             'title' => 'Sales Audit Logs',
@@ -553,25 +654,15 @@ public function today() {
     }
 
     /**
-     * AR sub-ledger vs GL control + running_balance integrity (Phase 2).
+     * Legacy URL — redirects to Reconciliation hub (Phase 4B).
      * URL: sales/reconcile
      */
     public function reconcile() {
         $this->requireRouteAccess();
-        $from = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['from'] ?? ''))
-            ? $_GET['from']
-            : date('Y-m-01');
-        $to = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['to'] ?? ''))
-            ? $_GET['to']
-            : date('Y-m-d');
-
-        $service = new ReconciliationService();
-        $this->view('sales/reconcile', [
-            'title'  => 'GL Reconciliation',
-            'report' => $service->runFullReport(null, $from, $to),
-            'from'   => $from,
-            'to'     => $to,
-        ]);
+        $qs = $_SERVER['QUERY_STRING'] ?? '';
+        $target = BASE_URL . 'Reconciliation/index' . ($qs !== '' ? '?' . $qs : '');
+        header('Location: ' . $target);
+        exit;
     }
 
     public function print_receipt($id = null) {
@@ -635,6 +726,31 @@ public function today() {
             'branch_id'     => (int)($invoice['branch_id'] ?? 1),
         ];
         $this->view('sales/invoice_copy', $data);
+    }
+
+    /**
+     * Posted invoice GL audit detail (Phase 5A).
+     * URL: sales/show/{id}
+     */
+    public function show($id = null)
+    {
+        if (!$id) {
+            $this->abortPage('Invoice ID required.');
+        }
+
+        $invoice = $this->invoiceService->getInvoiceById((int)$id);
+        if (!$invoice) {
+            $this->abortPage('Invoice not found.');
+        }
+
+        $invoiceId = (int)$invoice['id'];
+        $this->view('sales/show', [
+            'title'          => 'Invoice — ' . ($invoice['invoice_code'] ?? ''),
+            'invoice'        => $invoice,
+            'journal_blocks' => SalesGlAuditHelper::invoiceJournalBlocks($invoice),
+            'challans'       => SalesGlAuditHelper::getInvoiceChallans($invoiceId),
+            'payments'       => SalesGlAuditHelper::getInvoicePayments($invoiceId),
+        ]);
     }
 
     public function export() {

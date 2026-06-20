@@ -30,7 +30,12 @@ $route = $rpt['route'] ?? '';
         <div class="d-flex flex-wrap gap-2 align-items-center">
             <?php if (!empty($rpt_export_url)): ?>
             <a href="<?= htmlspecialchars($rpt_export_url, ENT_QUOTES) ?>" class="btn btn-light btn-sm">
-                <i class="fas fa-file-csv me-1"></i> Export
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <?php endif; ?>
+            <?php if (!empty($rpt_export_pdf_url)): ?>
+            <a href="<?= htmlspecialchars($rpt_export_pdf_url, ENT_QUOTES) ?>" class="btn btn-outline-light btn-sm" target="_blank">
+                <i class="fas fa-file-pdf me-1"></i> PDF
             </a>
             <?php endif; ?>
             <?php if (!empty($rpt_has_run)): ?>

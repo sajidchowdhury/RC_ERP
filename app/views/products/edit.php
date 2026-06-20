@@ -4,7 +4,7 @@ $title = $title ?? 'Edit Product';
 $product = $product ?? [];
 $categories = $categories ?? [];
 $units = $units ?? ['Pcs', 'Carton', 'KG', 'Bag', 'Dobe', 'Set'];
-$snapshot = $snapshot ?? ['total_stock' => 0, 'current_price' => 0];
+$snapshot = $snapshot ?? ['total_stock' => 0, 'current_price' => 0, 'min_rate' => 0, 'max_rate' => 0, 'default_rate' => 0, 'has_price' => false];
 $publicUrl = $publicUrl ?? BASE_URL;
 $productId = (int)($product['id'] ?? 0);
 ?>
@@ -45,8 +45,13 @@ $productId = (int)($product['id'] ?? 0);
                 <strong><?= number_format((float)$snapshot['total_stock'], 2) ?></strong>
             </div>
             <div class="branch-aside-stat">
-                <span><i class="fas fa-tag me-1 text-muted"></i> Selling price</span>
-                <strong class="product-price-tag">Tk <?= number_format((float)$snapshot['current_price'], 2) ?></strong>
+                <span><i class="fas fa-tag me-1 text-muted"></i> Selling range</span>
+                <?php if (!empty($snapshot['has_price'])): ?>
+                <strong class="product-price-tag d-block">Tk <?= number_format((float)$snapshot['min_rate'], 2) ?> – <?= number_format((float)$snapshot['max_rate'], 2) ?></strong>
+                <small class="text-muted">Default: Tk <?= number_format((float)$snapshot['default_rate'], 2) ?></small>
+                <?php else: ?>
+                <strong class="text-muted">Not set</strong>
+                <?php endif; ?>
             </div>
             <div class="mt-3 d-grid gap-2">
                 <a href="<?= BASE_URL ?>product/price_history/<?= $productId ?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-chart-line me-1"></i> Price history</a>

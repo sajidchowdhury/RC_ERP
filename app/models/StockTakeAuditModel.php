@@ -21,6 +21,8 @@ class StockTakeAuditModel
         $sections = [
             $this->sectionWorkflow(),
             $this->sectionDataIntegrity(),
+            $this->sectionGlJournalLinks(),
+            $this->sectionLedgerNature(),
             $this->sectionStockGl(),
             $this->sectionOperations(),
         ];
@@ -48,6 +50,7 @@ class StockTakeAuditModel
             ],
             'ran_at'    => date('Y-m-d H:i:s'),
             'branch_id' => $this->branchId,
+            'missing_session_journals' => $this->getSessionsMissingJournalRows(),
         ];
     }
 
@@ -244,6 +247,161 @@ class StockTakeAuditModel
                 ),
             ],
         ];
+    }
+
+    private function sectionGlJournalLinks(): array
+    {
+        return [
+            'id'    => 'gl_links',
+            'title' => 'GL journal link columns',
+            'icon'  => 'fa-link',
+            'items' => [
+                $this->item(
+                    'gl_col_st',
+                    'reference',
+                    'stock_take_sessions.journal_entry_id',
+                    'Session post: Dr shrinkage / Cr inventory (shortage) and Dr inventory / Cr surplus (overage). View on StockTake/details/{id}.',
+                    'info',
+                    null,
+                    true,
+                    'StockTake'
+                ),
+                $this->item(
+                    'gl_col_adj',
+                    'reference',
+                    'stock_adjustments.journal_entry_id',
+                    'Decrease/increase adjustment GL. View on StockAdjustment/details/{id}.',
+                    'info',
+                    null,
+                    true,
+                    'StockAdjustment'
+                ),
+                $this->item(
+                    'gl_col_dmg',
+                    'reference',
+                    'damage_invoices.journal_entry_id',
+                    'Dr shrinkage / Cr inventory. View on Damage/details/{id}.',
+                    'info',
+                    null,
+                    true,
+                    'Damage'
+                ),
+            ],
+        ];
+    }
+
+    private function sectionLedgerNature(): array
+    {
+        $shrinkageLedgers = $this->scalarCount("
+            SELECT COUNT(*) AS c FROM ledgers
+            WHERE ledger_nature = 'inventory_shrinkage' AND is_active = 1
+        ");
+        $surplusLedgers = $this->scalarCount("
+            SELECT COUNT(*) AS c FROM ledgers
+            WHERE ledger_nature = 'inventory_surplus' AND is_active = 1
+        ");
+        $shortageNotShrinkage = $this->countStockTakeShortageNotUsingShrinkageNature();
+
+        return [
+            'id'    => 'ledger_nature',
+            'title' => 'Shrinkage & surplus ledgers (migration 024)',
+            'icon'  => 'fa-book',
+            'items' => [
+                $this->item(
+                    'nat_shrink',
+                    'auto',
+                    'inventory_shrinkage ledger exists',
+                    'Required for stock take shortage, adjustment decrease, and damage posting.',
+                    $shrinkageLedgers > 0 ? 'pass' : 'fail',
+                    $shrinkageLedgers > 0 ? "{$shrinkageLedgers} active ledger(s)" : 'Missing — run migration 024'
+                ),
+                $this->item(
+                    'nat_surplus',
+                    'auto',
+                    'inventory_surplus ledger exists',
+                    'Required for stock take overage and adjustment increase.',
+                    $surplusLedgers > 0 ? 'pass' : 'fail',
+                    $surplusLedgers > 0 ? "{$surplusLedgers} active ledger(s)" : 'Missing — run migration 024'
+                ),
+                $this->item(
+                    'st_shrink_use',
+                    'auto',
+                    'Stock take shortages use shrinkage nature',
+                    'Posted sessions with shortage should debit inventory_shrinkage (not COGS fallback).',
+                    $shortageNotShrinkage === 0 ? 'pass' : 'warn',
+                    $shortageNotShrinkage === 0
+                        ? 'OK'
+                        : "{$shortageNotShrinkage} session(s) debiting non-shrinkage ledger"
+                ),
+            ],
+        ];
+    }
+
+    private function countStockTakeShortageNotUsingShrinkageNature(): int
+    {
+        if ($this->scalarCount("SELECT COUNT(*) AS c FROM ledgers WHERE ledger_nature = 'inventory_shrinkage' AND is_active = 1") === 0) {
+            return 0;
+        }
+
+        return $this->scalarCount("
+            SELECT COUNT(*) AS c FROM stock_take_sessions sts
+            INNER JOIN journal_entries je ON je.id = sts.journal_entry_id
+            WHERE sts.status = 'adjusted'
+              AND COALESCE(sts.is_reversed, 0) = 0
+              AND COALESCE(sts.journal_entry_id, 0) > 0
+              AND EXISTS (
+                  SELECT 1 FROM stock_take_items sti
+                  WHERE sti.stock_take_session_id = sts.id
+                    AND sti.physical_qty < sti.system_qty
+                    AND ABS((sti.physical_qty - sti.system_qty) * COALESCE(sti.rate, 0)) >= 0.01
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM journal_entry_lines jel
+                  INNER JOIN ledgers l ON l.id = jel.ledger_id
+                  WHERE jel.journal_entry_id = je.id
+                    AND l.ledger_nature = 'inventory_shrinkage'
+                    AND jel.debit >= 0.01
+              )
+              {$this->branchFilter('sts.branch_id')}
+        ");
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getSessionsMissingJournalRows(int $limit = 15): array
+    {
+        try {
+            $this->db->query("
+                SELECT sts.id, sts.session_code, sts.take_date,
+                       COALESCE(SUM(
+                           CASE
+                               WHEN sti.physical_qty < sti.system_qty
+                                   THEN ABS((sti.physical_qty - sti.system_qty) * COALESCE(sti.rate, 0))
+                               WHEN sti.physical_qty > sti.system_qty
+                                   THEN ABS((sti.physical_qty - sti.system_qty) * COALESCE(sti.rate, 0))
+                               ELSE 0
+                           END
+                       ), 0) AS variance_value
+                FROM stock_take_sessions sts
+                INNER JOIN stock_take_items sti ON sti.stock_take_session_id = sts.id
+                WHERE sts.status = 'adjusted'
+                  AND COALESCE(sts.is_reversed, 0) = 0
+                  AND COALESCE(sts.journal_entry_id, 0) = 0
+                  AND sti.physical_qty <> sti.system_qty
+                  AND ABS((sti.physical_qty - sti.system_qty) * COALESCE(sti.rate, 0)) >= 0.01
+                  {$this->branchFilter('sts.branch_id')}
+                GROUP BY sts.id, sts.session_code, sts.take_date
+                ORDER BY sts.take_date DESC
+                LIMIT " . (int)$limit
+            );
+
+            return $this->db->resultSet() ?: [];
+        } catch (Exception $e) {
+            error_log('StockTakeAuditModel::getSessionsMissingJournalRows: ' . $e->getMessage());
+
+            return [];
+        }
     }
 
     private function sectionStockGl(): array

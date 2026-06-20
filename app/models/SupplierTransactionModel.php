@@ -409,26 +409,14 @@ class SupplierTransactionModel extends Helper {
         return $stats;
     }
 
-    public function getFilteredTransactions(array $filters = [], ?int $branchId = null): array
+    /**
+     * Build WHERE clause fragments for payment list queries.
+     *
+     * @return array{0: array<int, string>, 1: array<string, mixed>}
+     */
+    private function buildPaymentListFilters(array $filters, ?int $branchId): array
     {
-        $sql = "
-            SELECT
-                sp.*,
-                s.supplier_name,
-                s.mobile,
-                b.bank_name,
-                u.username AS created_by_name,
-                e.name AS collected_by_name,
-                br.branch_name
-            FROM supplier_payments sp
-            JOIN suppliers s ON sp.supplier_id = s.id
-            LEFT JOIN banks b ON sp.bank_id = b.id
-            LEFT JOIN users u ON sp.created_by = u.id
-            LEFT JOIN employees e ON sp.collected_by = e.id
-            LEFT JOIN branches br ON sp.branch_id = br.id
-        ";
-
-        $where    = [];
+        $where = [];
         $bindings = [];
 
         if ($branchId > 0) {
@@ -474,13 +462,158 @@ class SupplierTransactionModel extends Helper {
 
         if (!empty($filters['payment_mode']) && $filters['payment_mode'] !== 'all') {
             $where[] = 'LOWER(sp.payment_mode) = :pmode';
-            $bindings[':pmode'] = strtolower($filters['payment_mode']);
+            $bindings[':pmode'] = strtolower((string)$filters['payment_mode']);
         }
 
         if (!empty($filters['supplier_id'])) {
             $where[] = 'sp.supplier_id = :sid';
             $bindings[':sid'] = (int)$filters['supplier_id'];
         }
+
+        return [$where, $bindings];
+    }
+
+    private function paymentListFromSql(): string
+    {
+        return "
+            FROM supplier_payments sp
+            JOIN suppliers s ON sp.supplier_id = s.id
+            LEFT JOIN banks b ON sp.bank_id = b.id
+            LEFT JOIN users u ON sp.created_by = u.id
+            LEFT JOIN employees e ON sp.collected_by = e.id
+            LEFT JOIN branches br ON sp.branch_id = br.id
+        ";
+    }
+
+    /**
+     * Server-side DataTables for supplier payment index.
+     */
+    public function getPaymentsForDataTable(array $params, array $filters, ?int $branchId): array
+    {
+        $start       = (int)($params['start'] ?? 0);
+        $length      = (int)($params['length'] ?? 25);
+        if ($length <= 0 || $length > 100) {
+            $length = 25;
+        }
+        $searchValue = trim($params['search']['value'] ?? '');
+        $reversedMode = $params['reversedMode'] ?? '';
+        $orderColumn = (int)($params['order'][0]['column'] ?? 0);
+        $orderDir    = strtolower($params['order'][0]['dir'] ?? 'desc') === 'asc' ? 'ASC' : 'DESC';
+
+        $columns = [
+            'sp.payment_date',
+            'sp.payment_code',
+            's.supplier_name',
+            'sp.transaction_type',
+            'sp.amount',
+            'sp.payment_mode',
+            'e.name',
+            'sp.is_reversed',
+        ];
+
+        $baseQuery = $this->paymentListFromSql();
+
+        [$where, $bindParams] = $this->buildPaymentListFilters($filters, $branchId);
+
+        if ($reversedMode === 'only_reversed') {
+            $where[] = 'sp.is_reversed = 1';
+        }
+
+        $branchOnlyWhere = [];
+        $branchOnlyBind = [];
+        if ($branchId > 0) {
+            $branchOnlyWhere[] = 'sp.branch_id = :branch_id';
+            $branchOnlyBind[':branch_id'] = $branchId;
+        } elseif (!$this->canOverrideBranch() && self::sessionBranchId() > 0) {
+            $branchOnlyWhere[] = 'sp.branch_id = :branch_id';
+            $branchOnlyBind[':branch_id'] = self::sessionBranchId();
+        }
+        $branchOnlySql = $branchOnlyWhere ? 'WHERE ' . implode(' AND ', $branchOnlyWhere) : '';
+
+        if ($searchValue !== '') {
+            $where[] = '(sp.payment_code LIKE :search
+                      OR s.supplier_name LIKE :search
+                      OR s.mobile LIKE :search
+                      OR s.supplier_code LIKE :search)';
+            $bindParams[':search'] = '%' . $searchValue . '%';
+        }
+
+        $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        $totalQuery = "SELECT COUNT(sp.id) AS total {$baseQuery} {$branchOnlySql}";
+        $this->db->query($totalQuery);
+        foreach ($branchOnlyBind as $key => $val) {
+            $this->db->bind($key, $val);
+        }
+        $recordsTotal = (int)($this->db->single()['total'] ?? 0);
+
+        $filteredQuery = "SELECT COUNT(sp.id) AS total {$baseQuery} {$whereSql}";
+        $this->db->query($filteredQuery);
+        foreach ($bindParams as $key => $val) {
+            $this->db->bind($key, $val);
+        }
+        $recordsFiltered = (int)($this->db->single()['total'] ?? 0);
+
+        $orderBy = $columns[$orderColumn] ?? 'sp.payment_date';
+        $dataQuery = "
+            SELECT
+                sp.id,
+                sp.payment_date,
+                sp.payment_code,
+                sp.supplier_id,
+                sp.transaction_type,
+                sp.amount,
+                sp.payment_mode,
+                sp.is_reversed,
+                sp.branch_id,
+                s.supplier_name,
+                s.mobile,
+                e.name AS collected_by_name
+            {$baseQuery}
+            {$whereSql}
+            ORDER BY {$orderBy} {$orderDir}, sp.id DESC
+            LIMIT {$start}, {$length}
+        ";
+
+        $this->db->query($dataQuery);
+        foreach ($bindParams as $key => $val) {
+            $this->db->bind($key, $val);
+        }
+        $data = $this->db->resultSet() ?: [];
+
+        foreach ($data as &$row) {
+            $row['can_reverse'] = $this->canUserReversePayment($row) ? 1 : 0;
+        }
+        unset($row);
+
+        return [
+            'draw'            => (int)($params['draw'] ?? 1),
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $data,
+        ];
+    }
+
+    public function getFilteredTransactions(array $filters = [], ?int $branchId = null): array
+    {
+        $sql = "
+            SELECT
+                sp.*,
+                s.supplier_name,
+                s.mobile,
+                b.bank_name,
+                u.username AS created_by_name,
+                e.name AS collected_by_name,
+                br.branch_name
+            FROM supplier_payments sp
+            JOIN suppliers s ON sp.supplier_id = s.id
+            LEFT JOIN banks b ON sp.bank_id = b.id
+            LEFT JOIN users u ON sp.created_by = u.id
+            LEFT JOIN employees e ON sp.collected_by = e.id
+            LEFT JOIN branches br ON sp.branch_id = br.id
+        ";
+
+        [$where, $bindings] = $this->buildPaymentListFilters($filters, $branchId);
 
         if (!empty($where)) {
             $sql .= ' WHERE ' . implode(' AND ', $where);

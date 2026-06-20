@@ -2,7 +2,7 @@
 ob_start();
 $title = $title ?? 'Edit Bank Account';
 $bank = $bank ?? [];
-$usage = $usage ?? ['balance' => 0, 'is_active' => true];
+$usage = $usage ?? ['balance' => 0, 'is_active' => true, 'can_deactivate' => true, 'transaction_count' => 0];
 $glLedgerId = (int)($gl_ledger_id ?? 0);
 $bankGlLedgers = $bank_gl_ledgers ?? [];
 $bankMappingEnabled = !empty($bank_mapping_enabled);
@@ -23,6 +23,9 @@ $balance = (float)($usage['balance'] ?? $bank['balance'] ?? 0);
             </span>
         </div>
         <div class="branch-hub-actions">
+            <a href="<?= BASE_URL ?>bank/show/<?= $bankId ?>" class="btn btn-outline-light btn-sm">
+                <i class="fas fa-circle-info me-1"></i> Hub
+            </a>
             <a href="<?= BASE_URL ?>bank" class="btn btn-outline-light btn-sm"><i class="fas fa-arrow-left me-1"></i> Back</a>
             <a href="<?= BASE_URL ?>bank/audit" class="btn btn-outline-light btn-sm"><i class="fas fa-clock-rotate-left me-1"></i> Audit</a>
         </div>
@@ -31,7 +34,11 @@ $balance = (float)($usage['balance'] ?? $bank['balance'] ?? 0);
     <div class="branch-form-layout has-aside">
         <div class="branch-form-panel">
             <form id="bank-edit-form" method="POST" action="<?= BASE_URL ?>bank/update/<?= $bankId ?>">
-                <?php $isEdit = true; require __DIR__ . '/_form_fields.php'; ?>
+                <?php
+                $isEdit = true;
+                $canDeactivate = !empty($usage['can_deactivate']);
+                require __DIR__ . '/_form_fields.php';
+                ?>
                 <div class="branch-form-footer">
                     <button type="submit" class="btn btn-primary px-4"><i class="fas fa-save me-1"></i> Save changes</button>
                     <a href="<?= BASE_URL ?>bank" class="btn btn-outline-secondary">Cancel</a>
@@ -49,6 +56,21 @@ $balance = (float)($usage['balance'] ?? $bank['balance'] ?? 0);
                     ? '<span class="branch-status-pill active"><span class="dot"></span> Active</span>'
                     : '<span class="branch-status-pill inactive"><span class="dot"></span> Inactive</span>' ?></div>
             </div>
+            <div class="branch-aside-stat">
+                <span><i class="fas fa-link text-muted me-1"></i> Linked transactions</span>
+                <strong><?= (int)($usage['transaction_count'] ?? 0) ?></strong>
+            </div>
+
+            <?php if (!empty($usage['has_balance']) || !empty($usage['has_transaction_history'])): ?>
+            <div class="branch-aside-tip">
+                <?php if (!empty($usage['has_balance'])): ?>
+                    Zero the cash book balance before deactivating.
+                <?php elseif (!empty($usage['has_transaction_history'])): ?>
+                    Linked payment/transfer history prevents deactivation from the list toggle.
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+
             <div class="aside-title">Ledger balance</div>
             <div class="branch-aside-stat">
                 <span><i class="fas fa-wallet text-muted me-1"></i> Current balance</span>

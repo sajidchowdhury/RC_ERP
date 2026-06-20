@@ -1,5 +1,7 @@
 <?php
 ob_start();
+require_once __DIR__ . '/../../helpers/MasterDataAuditHelper.php';
+
 $title = $title ?? 'Supplier Audit Logs';
 $logs = $logs ?? [];
 
@@ -39,27 +41,6 @@ function supplierAuditActionLabel(string $action): string
         str_contains($action, 'restored') => 'Restored',
         default => $action,
     };
-}
-
-function supplierAuditFormatDetails($details): string
-{
-    if (empty($details) || !is_array($details)) {
-        return '<span class="text-muted">—</span>';
-    }
-
-    $parts = [];
-    if (!empty($details['supplier_name'])) {
-        $parts[] = '<strong>Supplier:</strong> ' . htmlspecialchars((string)$details['supplier_name'], ENT_QUOTES);
-    }
-    if (!empty($details['new_status'])) {
-        $parts[] = '<strong>Status:</strong> ' . htmlspecialchars((string)$details['new_status'], ENT_QUOTES);
-    }
-    if (empty($parts)) {
-        $json = json_encode($details, JSON_UNESCAPED_UNICODE);
-        return '<span class="branch-audit-details">' . htmlspecialchars($json ?: '', ENT_QUOTES) . '</span>';
-    }
-
-    return '<div class="branch-audit-details">' . implode(' · ', $parts) . '</div>';
 }
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
@@ -118,18 +99,22 @@ function supplierAuditFormatDetails($details): string
                         ?>
                         <tr>
                             <td><small class="text-nowrap"><?= htmlspecialchars($log['timestamp'] ?? '', ENT_QUOTES) ?></small></td>
-                            <td>
-                                <span class="badge rounded-pill bg-light text-dark border">
-                                    #<?= (int)($log['performed_by'] ?? 0) ?>
-                                </span>
-                            </td>
+                            <td><?= htmlspecialchars($log['performed_by_name'] ?? ('#' . (int)($log['performed_by'] ?? 0)), ENT_QUOTES) ?></td>
                             <td>
                                 <span class="branch-audit-action <?= $actionClass ?>">
                                     <?= htmlspecialchars(supplierAuditActionLabel($action), ENT_QUOTES) ?>
                                 </span>
                             </td>
-                            <td><strong><?= htmlspecialchars((string)$targetId, ENT_QUOTES) ?></strong></td>
-                            <td><?= supplierAuditFormatDetails($log['details'] ?? []) ?></td>
+                            <td>
+                                <?php if (is_numeric($targetId) && (int)$targetId > 0): ?>
+                                <a href="<?= BASE_URL ?>supplier/show/<?= (int)$targetId ?>" class="fw-semibold text-decoration-none">
+                                    #<?= (int)$targetId ?>
+                                </a>
+                                <?php else: ?>
+                                <strong><?= htmlspecialchars((string)$targetId, ENT_QUOTES) ?></strong>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= MasterDataAuditHelper::renderDetailsHtml($log['details'] ?? []) ?></td>
                             <td><small class="text-muted"><?= htmlspecialchars($log['ip'] ?? 'unknown', ENT_QUOTES) ?></small></td>
                         </tr>
                     <?php endforeach; ?>

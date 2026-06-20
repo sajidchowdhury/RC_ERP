@@ -396,6 +396,77 @@
     margin-right: auto;
 }
 
+.challan-kbd-hint {
+    font-size: 0.75rem;
+    color: var(--ch-muted);
+    margin-left: 0.25rem;
+}
+
+.challan-kbd-hint kbd {
+    font-size: 0.68rem;
+    padding: 0.1rem 0.3rem;
+}
+
+.challan-bulk-bar {
+    padding: 0.75rem 1rem;
+    background: #fffbeb;
+    border-bottom: 1px solid var(--ch-border);
+}
+
+.challan-bulk-bar--compact {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.challan-bulk-bar-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.challan-bulk-bar-inner label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.challan-bulk-bar-inner select {
+    min-width: 160px;
+    max-width: 220px;
+}
+
+.challan-assign-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-top: 0.55rem;
+}
+
+.challan-assign-progress {
+    flex: 1;
+    height: 6px;
+    background: #e7e5e4;
+    border-radius: 999px;
+    overflow: hidden;
+    max-width: 280px;
+}
+
+.challan-assign-progress > div {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--ch-primary), var(--ch-accent));
+    border-radius: 999px;
+    transition: width 0.2s ease;
+}
+
+.challan-assign-progress-label {
+    font-size: 0.72rem;
+    color: var(--ch-muted);
+    white-space: nowrap;
+}
+
 #dispatcher_id + .select2-container {
     width: 100% !important;
 }

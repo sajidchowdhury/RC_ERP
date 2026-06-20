@@ -6,6 +6,7 @@ require_once '../app/models/PurchaseReturnModel.php';
 require_once '../app/models/BranchModel.php';
 require_once '../app/helpers/Helper.php';
 require_once '../core/UserAudit.php';
+require_once '../app/helpers/PurchaseGlAuditHelper.php';
 
 class PurchaseReturnController extends BaseController {
 
@@ -211,6 +212,30 @@ public function get_receive_for_return() {
         }
 
         $this->sendJson($result);
+    }
+
+    /**
+     * Purchase return GL audit detail (Phase 5B).
+     * URL: PurchaseReturn/details/{id}
+     */
+    public function details($id = null) {
+        if (!$id) {
+            $this->redirect('PurchaseReturn');
+            return;
+        }
+
+        $return = $this->model->getReturnForSlip((int)$id);
+        if (!$return) {
+            $_SESSION['error'] = 'Return not found or access denied.';
+            $this->redirect('PurchaseReturn');
+            return;
+        }
+
+        $this->view('PurchaseReturn/details', [
+            'title'          => 'Purchase Return — ' . ($return['return_code'] ?? ''),
+            'return'         => $return,
+            'journal_blocks' => PurchaseGlAuditHelper::returnJournalBlocks($return),
+        ]);
     }
 
     public function slip($id = null) {

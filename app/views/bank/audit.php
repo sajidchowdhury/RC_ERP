@@ -1,5 +1,7 @@
 <?php
 ob_start();
+require_once __DIR__ . '/../../helpers/MasterDataAuditHelper.php';
+
 $title = $title ?? 'Bank Audit Logs';
 $logs = $logs ?? [];
 $countCreated = $countUpdated = $countStatus = 0;
@@ -24,13 +26,6 @@ function bankAuditLabel(string $action): string {
         str_contains($action, 'restored') => 'Restored',
         default => $action,
     };
-}
-function bankAuditDetails($details): string {
-    if (empty($details) || !is_array($details)) return '<span class="text-muted">—</span>';
-    $parts = [];
-    if (!empty($details['bank_name'])) $parts[] = '<strong>Bank:</strong> ' . htmlspecialchars((string)$details['bank_name'], ENT_QUOTES);
-    if (empty($parts)) return '<span class="branch-audit-details">' . htmlspecialchars(json_encode($details, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '</span>';
-    return '<div class="branch-audit-details">' . implode(' · ', $parts) . '</div>';
 }
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
@@ -79,13 +74,22 @@ function bankAuditDetails($details): string {
                     <?php else: foreach ($logs as $log):
                         $action = (string)($log['action'] ?? '');
                         $cls = bankAuditClass($action);
+                        $targetId = $log['target_user_id'] ?? '—';
                     ?>
                     <tr>
                         <td><small class="text-nowrap"><?= htmlspecialchars($log['timestamp'] ?? '', ENT_QUOTES) ?></small></td>
-                        <td><span class="badge rounded-pill bg-light text-dark border">#<?= (int)($log['performed_by'] ?? 0) ?></span></td>
+                        <td><?= htmlspecialchars($log['performed_by_name'] ?? ('#' . (int)($log['performed_by'] ?? 0)), ENT_QUOTES) ?></td>
                         <td><span class="branch-audit-action <?= $cls ?>"><?= htmlspecialchars(bankAuditLabel($action), ENT_QUOTES) ?></span></td>
-                        <td><strong><?= htmlspecialchars((string)($log['target_user_id'] ?? '—'), ENT_QUOTES) ?></strong></td>
-                        <td><?= bankAuditDetails($log['details'] ?? []) ?></td>
+                        <td>
+                            <?php if (is_numeric($targetId) && (int)$targetId > 0): ?>
+                            <a href="<?= BASE_URL ?>bank/show/<?= (int)$targetId ?>" class="fw-semibold text-decoration-none">
+                                #<?= (int)$targetId ?>
+                            </a>
+                            <?php else: ?>
+                            <strong><?= htmlspecialchars((string)$targetId, ENT_QUOTES) ?></strong>
+                            <?php endif; ?>
+                        </td>
+                        <td><?= MasterDataAuditHelper::renderDetailsHtml($log['details'] ?? []) ?></td>
                         <td><small class="text-muted"><?= htmlspecialchars($log['ip'] ?? 'unknown', ENT_QUOTES) ?></small></td>
                     </tr>
                     <?php endforeach; endif; ?>

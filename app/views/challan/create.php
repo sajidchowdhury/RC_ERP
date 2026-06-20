@@ -176,6 +176,30 @@ ob_start();
                 <span class="badge bg-secondary ms-auto"><?= (int)$itemCount ?></span>
             </div>
             <div class="challan-create-panel-body p-0">
+                <?php if (!$isCompleted && !$lockGodownAssignments): ?>
+                <div class="challan-bulk-bar" id="challanBulkBar">
+                    <div class="challan-bulk-bar-inner">
+                        <label for="chBulkWarehouse"><i class="fas fa-layer-group me-1"></i>Apply warehouse to all</label>
+                        <select id="chBulkWarehouse" class="form-select form-select-sm">
+                            <option value="">— Choose warehouse —</option>
+                        </select>
+                        <button type="button" class="btn btn-sm btn-warning" id="chApplyBulkWarehouse">Apply</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="chFillAllCtn" title="Copy order CTN to dispatch CTN column">
+                            <i class="fas fa-clone me-1"></i>Fill all CTN
+                        </button>
+                    </div>
+                    <div class="challan-assign-progress-wrap" aria-hidden="true">
+                        <div class="challan-assign-progress"><div id="chAssignProgressBar"></div></div>
+                        <span class="challan-assign-progress-label" id="chAssignProgressLabel">0 / 0 warehouses set</span>
+                    </div>
+                </div>
+                <?php elseif ($lockGodownAssignments && !$isCompleted): ?>
+                <div class="challan-bulk-bar challan-bulk-bar--compact">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="chFillAllCtn">
+                        <i class="fas fa-clone me-1"></i>Fill all CTN from order
+                    </button>
+                </div>
+                <?php endif; ?>
                 <div class="table-responsive challan-items-scroll">
                     <table class="table table-bordered godown-mobile-table mb-0" id="godownItemsTable">
                         <thead>
@@ -296,6 +320,7 @@ ob_start();
                 title="<?= $isGodownReady ? 'Issue stock and complete challan' : 'Save godown copy first' ?>">
             <i class="fas fa-check-double"></i> Finalize challan
         </button>
+        <span class="challan-kbd-hint d-none d-md-inline"><kbd>Ctrl</kbd>+<kbd>S</kbd> save godown</span>
         <?php else: ?>
         <span class="challan-completed-note"><i class="fas fa-check-circle text-success"></i> Challan completed</span>
         <?php if ($canReverse): ?>

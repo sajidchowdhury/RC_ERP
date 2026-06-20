@@ -43,6 +43,7 @@ function empAuditDetails($details): string {
         </div>
         <div class="branch-hub-actions">
             <a href="<?= BASE_URL ?>employee/create" class="btn btn-outline-light btn-sm"><i class="fas fa-plus me-1"></i> New</a>
+            <a href="<?= BASE_URL ?>user/security_audit" class="btn btn-light btn-sm"><i class="fas fa-shield-halved me-1"></i> Unified audit</a>
             <a href="<?= BASE_URL ?>employee" class="btn btn-light btn-sm"><i class="fas fa-arrow-left me-1"></i> Directory</a>
         </div>
     </header>
@@ -55,7 +56,7 @@ function empAuditDetails($details): string {
     <div class="branch-hub-panel branch-audit-panel">
         <div class="table-responsive">
             <table class="table table-borderless mb-0 w-100" id="auditTable">
-                <thead><tr><th>When</th><th>User</th><th>Action</th><th>Employee ID</th><th>Details</th><th>IP</th></tr></thead>
+                <thead><tr><th>When</th><th>Performed by</th><th>Action</th><th>Employee ID</th><th>Details</th><th>IP</th></tr></thead>
                 <tbody>
                 <?php if (empty($logs)): ?>
                 <tr><td colspan="6" class="text-center text-muted py-5">No employee audit logs yet.</td></tr>
@@ -63,7 +64,7 @@ function empAuditDetails($details): string {
                     $action = (string)($log['action'] ?? ''); ?>
                 <tr>
                     <td><small class="text-nowrap"><?= htmlspecialchars($log['timestamp'] ?? '', ENT_QUOTES) ?></small></td>
-                    <td><span class="badge rounded-pill bg-light text-dark border">#<?= (int)($log['performed_by'] ?? 0) ?></span></td>
+                    <td><span class="badge rounded-pill bg-light text-dark border"><?= htmlspecialchars((string)($log['performed_by_label'] ?? ('#' . (int)($log['performed_by'] ?? 0))), ENT_QUOTES) ?></span></td>
                     <td><span class="branch-audit-action <?= empAuditClass($action) ?>"><?= htmlspecialchars(empAuditLabel($action), ENT_QUOTES) ?></span></td>
                     <td><strong><?= htmlspecialchars((string)($log['target_user_id'] ?? '—'), ENT_QUOTES) ?></strong></td>
                     <td><?= empAuditDetails($log['details'] ?? []) ?></td>

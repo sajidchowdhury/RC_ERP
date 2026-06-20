@@ -5,6 +5,7 @@ require_once '../core/BaseController.php';
 require_once '../app/models/DamageModel.php';
 require_once '../app/models/DamageAuditModel.php';
 require_once '../app/helpers/Helper.php';
+require_once '../app/helpers/StockGlAuditHelper.php';
 
 class DamageController extends BaseController {
 
@@ -21,6 +22,8 @@ class DamageController extends BaseController {
             'date_to'      => $_GET['date_to'] ?? null,
             'warehouse_id' => $_GET['warehouse_id'] ?? null,
             'status'       => $_GET['status'] ?? 'all',
+            'source'       => $_GET['source'] ?? 'all',
+            'sales_return_id' => $_GET['sales_return_id'] ?? null,
         ];
 
         $damages = $this->model->getFilteredDamages($filters);
@@ -87,13 +90,13 @@ class DamageController extends BaseController {
         $audit = (new DamageAuditModel())->runDamageChecks((int)$id);
 
         $this->view('Damage/details', [
-            'title'        => 'Damage #' . ($damage['damage_code'] ?? ''),
-            'damage'       => $damage,
-            'items'        => $this->model->getDamageItems((int)$id),
-            'movements'    => $this->model->getDamageMovements((int)$id),
-            'journal_entry'=> $this->model->getJournalEntryForDamage((int)$id),
-            'damage_audit' => $audit,
-            'can_reverse'  => $this->model->canUserReverseDamage($damage),
+            'title'          => 'Damage #' . ($damage['damage_code'] ?? ''),
+            'damage'         => $damage,
+            'items'          => $this->model->getDamageItems((int)$id),
+            'movements'      => $this->model->getDamageMovements((int)$id),
+            'journal_blocks' => StockGlAuditHelper::damageJournalBlocks($damage),
+            'damage_audit'   => $audit,
+            'can_reverse'    => $this->model->canUserReverseDamage($damage),
         ]);
     }
 

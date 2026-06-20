@@ -312,7 +312,8 @@ REVERSE RETURN→ STK IN + GL reverse + is_reversed + returned_qty rollback (+ l
 
 ## 9. Related documentation
 
-- [PURCHASE_MODULE_MODERNIZATION_PLAN.md](./PURCHASE_MODULE_MODERNIZATION_PLAN.md) — phased rollout and completion status  
+- [PURCHASE_MODULE_REMAINING_PHASES.md](./PURCHASE_MODULE_REMAINING_PHASES.md) — **remaining work** (Phases 7–15), session-sized tasks and verification gates  
+- [PURCHASE_MODULE_MODERNIZATION_PLAN.md](./PURCHASE_MODULE_MODERNIZATION_PLAN.md) — phased rollout and completion status (Phases 1–6)  
 - [ACCOUNTING_PROGRESS.md](./ACCOUNTING_PROGRESS.md) — GL ledger natures (`inventory`, `supplier_payable`, etc.)  
 - Sales parity: [SALES_MODULE_MODERNIZATION_PLAN.md](./SALES_MODULE_MODERNIZATION_PLAN.md) (returns/reverse UI patterns)
 

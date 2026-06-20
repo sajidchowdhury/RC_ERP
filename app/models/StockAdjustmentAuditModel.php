@@ -20,6 +20,8 @@ class StockAdjustmentAuditModel
     {
         $sections = [
             $this->sectionWorkflow(),
+            $this->sectionGlJournalLinks(),
+            $this->sectionLedgerNature(),
             $this->sectionStockGl(),
             $this->sectionDataIntegrity(),
             $this->sectionOperations(),
@@ -48,6 +50,8 @@ class StockAdjustmentAuditModel
             ],
             'ran_at'    => date('Y-m-d H:i:s'),
             'branch_id' => $this->branchId,
+            'missing_adjustment_journals' => $this->getAdjustmentsMissingJournalRows(),
+            'missing_damage_journals'     => $this->getDamageMissingJournalRows(),
         ];
     }
 
@@ -135,6 +139,133 @@ class StockAdjustmentAuditModel
                 $this->item('wf_st', 'reference', 'Physical counts', 'Use Stock Take for warehouse-wide counts; use Adjustment for damage, found stock, corrections.', 'info', null, true, 'StockTake'),
             ],
         ];
+    }
+
+    private function sectionGlJournalLinks(): array
+    {
+        return [
+            'id'    => 'gl_links',
+            'title' => 'GL journal link columns',
+            'icon'  => 'fa-link',
+            'items' => [
+                $this->item(
+                    'gl_col_adj',
+                    'reference',
+                    'stock_adjustments.journal_entry_id',
+                    'Decrease → Dr shrinkage / Cr inventory; increase → Dr inventory / Cr surplus. View on StockAdjustment/details/{id}.',
+                    'info',
+                    null,
+                    true,
+                    'StockAdjustment'
+                ),
+                $this->item(
+                    'gl_col_st',
+                    'reference',
+                    'stock_take_sessions.journal_entry_id',
+                    'Physical count variances. View on StockTake/details/{id}.',
+                    'info',
+                    null,
+                    true,
+                    'StockTake'
+                ),
+                $this->item(
+                    'gl_col_dmg',
+                    'reference',
+                    'damage_invoices.journal_entry_id',
+                    'Write-off GL. View on Damage/details/{id}.',
+                    'info',
+                    null,
+                    true,
+                    'Damage'
+                ),
+            ],
+        ];
+    }
+
+    private function sectionLedgerNature(): array
+    {
+        $shrinkageLedgers = $this->scalarCount("
+            SELECT COUNT(*) AS c FROM ledgers
+            WHERE ledger_nature = 'inventory_shrinkage' AND is_active = 1
+        ");
+        $surplusLedgers = $this->scalarCount("
+            SELECT COUNT(*) AS c FROM ledgers
+            WHERE ledger_nature = 'inventory_surplus' AND is_active = 1
+        ");
+
+        return [
+            'id'    => 'ledger_nature',
+            'title' => 'Shrinkage & surplus ledgers (migration 024)',
+            'icon'  => 'fa-book',
+            'items' => [
+                $this->item(
+                    'nat_shrink',
+                    'auto',
+                    'inventory_shrinkage ledger exists',
+                    'Decrease adjustments and damage write-offs debit this nature.',
+                    $shrinkageLedgers > 0 ? 'pass' : 'fail',
+                    $shrinkageLedgers > 0 ? "{$shrinkageLedgers} active ledger(s)" : 'Missing — run migration 024'
+                ),
+                $this->item(
+                    'nat_surplus',
+                    'auto',
+                    'inventory_surplus ledger exists',
+                    'Increase adjustments credit this nature.',
+                    $surplusLedgers > 0 ? 'pass' : 'fail',
+                    $surplusLedgers > 0 ? "{$surplusLedgers} active ledger(s)" : 'Missing — run migration 024'
+                ),
+            ],
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAdjustmentsMissingJournalRows(int $limit = 15): array
+    {
+        try {
+            $this->db->query("
+                SELECT sa.id, sa.adjustment_code, sa.adjustment_date, sa.total_amount, sa.adjustment_type
+                FROM stock_adjustments sa
+                WHERE COALESCE(sa.is_reversed, 0) = 0
+                  AND sa.total_amount >= 0.01
+                  AND COALESCE(sa.journal_entry_id, 0) = 0
+                  {$this->branchFilter('sa.warehouse_id')}
+                ORDER BY sa.adjustment_date DESC
+                LIMIT " . (int)$limit
+            );
+
+            return $this->db->resultSet() ?: [];
+        } catch (Exception $e) {
+            error_log('StockAdjustmentAuditModel::getAdjustmentsMissingJournalRows: ' . $e->getMessage());
+
+            return [];
+        }
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getDamageMissingJournalRows(int $limit = 15): array
+    {
+        try {
+            $this->db->query("
+                SELECT di.id, di.damage_code, di.damage_date, di.total_value
+                FROM damage_invoices di
+                WHERE COALESCE(di.is_reversed, 0) = 0
+                  AND di.total_value >= 0.01
+                  AND COALESCE(di.journal_entry_id, 0) = 0
+                  {$this->branchFilter('di.warehouse_id')}
+                ORDER BY di.damage_date DESC
+                LIMIT " . (int)$limit
+            );
+
+            return $this->db->resultSet() ?: [];
+        } catch (Exception $e) {
+            error_log('StockAdjustmentAuditModel::getDamageMissingJournalRows: ' . $e->getMessage());
+
+            return [];
+        }
     }
 
     private function sectionStockGl(): array
@@ -271,6 +402,12 @@ class StockAdjustmentAuditModel
             return " AND EXISTS (
                 SELECT 1 FROM warehouses w
                 WHERE w.id = sa.warehouse_id AND w.branch_id = " . (int)$this->branchId . '
+            )';
+        }
+        if ($column === 'di.warehouse_id') {
+            return " AND EXISTS (
+                SELECT 1 FROM warehouses w
+                WHERE w.id = di.warehouse_id AND w.branch_id = " . (int)$this->branchId . '
             )';
         }
         return ' AND ' . $column . ' = ' . (int)$this->branchId;

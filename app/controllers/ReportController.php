@@ -5,6 +5,7 @@ require_once __DIR__ . '/../helpers/ReportsCatalog.php';
 require_once '../core/BaseController.php';
 require_once '../app/models/SalesModel.php';
 require_once __DIR__ . '/../services/Security/RouteAccess.php';
+require_once __DIR__ . '/../../core/InvestigationMode.php';
 
 class ReportController extends BaseController {
 
@@ -23,6 +24,7 @@ class ReportController extends BaseController {
             'categories' => ReportsCatalog::categories(),
             'featured'   => ReportsCatalog::featured(),
             'branch_name'=> $_SESSION['branch_name'] ?? 'Your branch',
+            'investigation_period' => InvestigationMode::getReportPeriod(),
         ]);
     }
 
@@ -38,8 +40,14 @@ class ReportController extends BaseController {
         // Support both GET (initial) and POST (AJAX) - POST takes precedence for large filter sets
         $input = array_merge($_GET, $_POST);
 
-        $from_date = $input['from_date'] ?? date('Y-m-d', strtotime('-30 days'));
-        $to_date   = $input['to_date']   ?? date('Y-m-d');
+        $range = $this->resolveReportDates(
+            $input['from_date'] ?? null,
+            $input['to_date'] ?? null,
+            date('Y-m-d', strtotime('-30 days')),
+            date('Y-m-d')
+        );
+        $from_date = $range['from'];
+        $to_date = $range['to'];
 
         $branch_ids = [];
         if (isset($input['branch_ids'])) {
@@ -68,6 +76,7 @@ class ReportController extends BaseController {
         // Pass to view for sticky filters (used in offcanvas)
         $data['from_date']     = $from_date;
         $data['to_date']       = $to_date;
+        $this->attachReportPeriodMeta($data, $range);
         $data['branch_ids']    = $branch_ids;
         $data['warehouse_ids'] = $warehouse_ids;
         $data['category_ids']  = $category_ids;
@@ -157,13 +166,20 @@ public function SupplierWisePurchase()
     $data['suppliers'] = $a->Get_All_Active_Supplier();
 
     // Input Handling
-    $from_date     = $_GET['from_date'] ?? date('Y-m-d', strtotime('-30 days'));
-    $to_date       = $_GET['to_date']   ?? date('Y-m-d');
+    $range = $this->resolveReportDates(
+        $_GET['from_date'] ?? null,
+        $_GET['to_date'] ?? null,
+        date('Y-m-d', strtotime('-30 days')),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
     $branch_ids    = isset($_GET['branch_ids']) ? (is_array($_GET['branch_ids']) ? $_GET['branch_ids'] : explode(',', $_GET['branch_ids'])) : [];
     $supplier_id   = $_GET['supplier_id'] ?? null;
 
     $data['from_date']   = $from_date;
     $data['to_date']     = $to_date;
+    $this->attachReportPeriodMeta($data, $range);
     $data['branch_ids']  = $branch_ids;
     $data['supplier_id'] = $supplier_id;
 
@@ -191,12 +207,19 @@ public function BranchWiseLedger()
     $data['branches'] = $a->Get_All_Active_Branches();
 
     // Input Handling
-    $from_date     = $_GET['from_date'] ?? date('Y-m-d', strtotime('-30 days'));
-    $to_date       = $_GET['to_date']   ?? date('Y-m-d');
+    $range = $this->resolveReportDates(
+        $_GET['from_date'] ?? null,
+        $_GET['to_date'] ?? null,
+        date('Y-m-d', strtotime('-30 days')),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
     $branch_id     = $_GET['branch_id'] ?? null;   // Single branch for ledger
 
     $data['from_date'] = $from_date;
     $data['to_date']   = $to_date;
+    $this->attachReportPeriodMeta($data, $range);
     $data['branch_id'] = $branch_id;
 
     if (isset($_GET['search']) || isset($_GET['export'])) {
@@ -222,12 +245,19 @@ public function DailyCashBook()
 
     $data['branches'] = $a->Get_All_Active_Branches();
 
-    $from_date = $_GET['from_date'] ?? date('Y-m-d', strtotime('-7 days'));
-    $to_date   = $_GET['to_date']   ?? date('Y-m-d');
+    $range = $this->resolveReportDates(
+        $_GET['from_date'] ?? null,
+        $_GET['to_date'] ?? null,
+        date('Y-m-d', strtotime('-7 days')),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
     $branch_id = $_GET['branch_id'] ?? null;
 
     $data['from_date'] = $from_date;
     $data['to_date']   = $to_date;
+    $this->attachReportPeriodMeta($data, $range);
     $data['branch_id'] = $branch_id;
 
     if (isset($_GET['search']) || isset($_GET['export'])) {
@@ -253,22 +283,31 @@ public function DailyCashBook()
  */
 public function TrialBalance()
 {
-    $from_date = $_GET['from_date'] ?? date('Y-m-01'); // Default to start of current month
-    $to_date   = $_GET['to_date']   ?? date('Y-m-d');
+    $range = $this->resolveReportDates(
+        $_GET['from_date'] ?? null,
+        $_GET['to_date'] ?? null,
+        date('Y-m-01'),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
     $account_type = $_GET['account_type'] ?? null;
+    $include_zero = !empty($_GET['include_zero']);
 
     $data = [
         'title'        => 'Trial Balance',
         'from_date'    => $from_date,
         'to_date'      => $to_date,
         'account_type' => $account_type,
+        'include_zero' => $include_zero,
     ];
+    $this->attachReportPeriodMeta($data, $range);
 
     if (isset($_GET['search']) || isset($_GET['export'])) {
         require_once '../app/models/Reports/TrialBalanceReport.php';
         $report = new TrialBalanceReport();
 
-        $result = $report->getTrialBalance($from_date, $to_date, $account_type);
+        $result = $report->getTrialBalance($from_date, $to_date, $account_type, $include_zero);
 
         if (isset($_GET['export'])) {
             $report->exportToCsv($result, 'Trial_Balance');
@@ -280,37 +319,420 @@ public function TrialBalance()
     $this->view('report/TrialBalance', $data);
 }
 
+/**
+ * Balance Sheet — Assets = Liabilities + Equity as of date (Phase 7B).
+ */
+public function BalanceSheet()
+{
+    $helper = new Helper();
+    $as_of_date = $this->resolveAsOfDate($_GET['as_of_date'] ?? null, date('Y-m-d'));
+    $branch_id = isset($_GET['branch_id']) && $_GET['branch_id'] !== ''
+        ? (int)$_GET['branch_id']
+        : null;
+
+    if (!$helper->canOverrideBranch()) {
+        $branch_id = Helper::sessionBranchId() ?: null;
+    }
+
+    $include_zero = !empty($_GET['include_zero']);
+
+    $data = [
+        'title'               => 'Balance Sheet',
+        'as_of_date'          => $as_of_date,
+        'branch_id'           => $branch_id,
+        'include_zero'        => $include_zero,
+        'branches'            => $helper->Get_All_Active_Branches(),
+        'can_override_branch' => $helper->canOverrideBranch(),
+    ];
+
+    if (isset($_GET['search']) || isset($_GET['export'])) {
+        require_once '../app/models/Reports/BalanceSheetReport.php';
+        $report = new BalanceSheetReport();
+        $result = $report->getBalanceSheet($as_of_date, $branch_id, $include_zero);
+
+        if (isset($_GET['export'])) {
+            $report->exportToCsv($result, 'Balance_Sheet');
+        }
+
+        $data['balance_sheet'] = $result;
+    }
+
+    $this->view('report/BalanceSheet', $data);
+}
+
+/**
+ * Profit & Loss — Income − Expense by ledger_nature groups (Phase 7A).
+ */
+public function ProfitAndLoss()
+{
+    require_once '../app/models/Reports/ProfitAndLossReport.php';
+    $helper = new Helper();
+    $range = $this->resolveReportDates(
+        $_GET['from_date'] ?? null,
+        $_GET['to_date'] ?? null,
+        date('Y-m-01'),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
+
+    $branch_id = isset($_GET['branch_id']) && $_GET['branch_id'] !== ''
+        ? (int)$_GET['branch_id']
+        : null;
+
+    if (!$helper->canOverrideBranch()) {
+        $branch_id = Helper::sessionBranchId() ?: null;
+    }
+
+    $include_zero = !empty($_GET['include_zero']);
+    $compare_prior = !empty($_GET['compare_prior']);
+    $compare_from = trim((string)($_GET['compare_from_date'] ?? ''));
+    $compare_to = trim((string)($_GET['compare_to_date'] ?? ''));
+
+    if ($compare_prior) {
+        $prior = ProfitAndLossReport::resolvePriorPeriod($from_date, $to_date);
+        if ($prior) {
+            $compare_from = $prior['from'];
+            $compare_to = $prior['to'];
+        }
+    }
+
+    $hasCompare = $compare_from !== '' && $compare_to !== ''
+        && preg_match('/^\d{4}-\d{2}-\d{2}$/', $compare_from)
+        && preg_match('/^\d{4}-\d{2}-\d{2}$/', $compare_to);
+
+    $data = [
+        'title'               => 'Profit & Loss',
+        'from_date'           => $from_date,
+        'to_date'             => $to_date,
+        'branch_id'           => $branch_id,
+        'include_zero'        => $include_zero,
+        'compare_prior'       => $compare_prior,
+        'compare_from_date'   => $hasCompare ? $compare_from : '',
+        'compare_to_date'     => $hasCompare ? $compare_to : '',
+        'branches'            => $helper->Get_All_Active_Branches(),
+        'can_override_branch' => $helper->canOverrideBranch(),
+    ];
+    $this->attachReportPeriodMeta($data, $range);
+
+    if (isset($_GET['search']) || isset($_GET['export'])) {
+        $report = new ProfitAndLossReport();
+        $result = $report->getProfitAndLoss(
+            $from_date,
+            $to_date,
+            $branch_id,
+            $include_zero,
+            $hasCompare ? $compare_from : null,
+            $hasCompare ? $compare_to : null
+        );
+
+        $export = $_GET['export'] ?? '';
+        if ($export === 'csv' || $export === '1') {
+            $report->exportToCsv($result, 'Profit_And_Loss');
+        }
+        if ($export === 'pdf') {
+            $report->exportToPdfHtml($result);
+        }
+
+        $data['profit_and_loss'] = $result;
+    }
+
+    $this->view('report/ProfitAndLoss', $data);
+}
+
+/**
+ * Cash Flow — indirect method from GL with bank reconciliation (Phase 7C).
+ */
+public function CashFlow()
+{
+    require_once '../app/models/Reports/CashFlowReport.php';
+    $helper = new Helper();
+    $range = $this->resolveReportDates(
+        $_GET['from_date'] ?? null,
+        $_GET['to_date'] ?? null,
+        date('Y-m-01'),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
+
+    $branch_id = isset($_GET['branch_id']) && $_GET['branch_id'] !== ''
+        ? (int)$_GET['branch_id']
+        : null;
+
+    if (!$helper->canOverrideBranch()) {
+        $branch_id = Helper::sessionBranchId() ?: null;
+    }
+
+    $data = [
+        'title'               => 'Cash Flow Statement',
+        'from_date'           => $from_date,
+        'to_date'             => $to_date,
+        'branch_id'           => $branch_id,
+        'branches'            => $helper->Get_All_Active_Branches(),
+        'can_override_branch' => $helper->canOverrideBranch(),
+    ];
+    $this->attachReportPeriodMeta($data, $range);
+
+    if (isset($_GET['search']) || isset($_GET['export'])) {
+        $report = new CashFlowReport();
+        $result = $report->getCashFlow($from_date, $to_date, $branch_id);
+
+        if (isset($_GET['export'])) {
+            $report->exportToCsv($result, 'Cash_Flow');
+        }
+
+        $data['cash_flow'] = $result;
+    }
+
+    $this->view('report/CashFlow', $data);
+}
+
+/**
+ * General Ledger — chronological activity for one account with running balance.
+ */
+public function GeneralLedger()
+{
+    $helper = new Helper();
+    $range = $this->resolveReportDates(
+        $_GET['from_date'] ?? null,
+        $_GET['to_date'] ?? null,
+        date('Y-m-01'),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
+    $ledger_id = isset($_GET['ledger_id']) && $_GET['ledger_id'] !== ''
+        ? (int)$_GET['ledger_id']
+        : null;
+    $branch_id = isset($_GET['branch_id']) && $_GET['branch_id'] !== ''
+        ? (int)$_GET['branch_id']
+        : null;
+
+    require_once '../app/models/LedgerModel.php';
+    $ledgerModel = new LedgerModel();
+
+    $data = [
+        'title'      => 'General Ledger',
+        'from_date'  => $from_date,
+        'to_date'    => $to_date,
+        'ledger_id'  => $ledger_id,
+        'branch_id'  => $branch_id,
+        'ledgers'    => $ledgerModel->getLedgersForDropdown(),
+        'branches'   => $helper->Get_All_Active_Branches(),
+    ];
+    $this->attachReportPeriodMeta($data, $range);
+
+    if ((isset($_GET['search']) || isset($_GET['export'])) && $ledger_id) {
+        require_once '../app/models/Reports/GeneralLedgerReport.php';
+        $report = new GeneralLedgerReport();
+        $result = $report->getGeneralLedger($ledger_id, $from_date, $to_date, $branch_id);
+
+        if (isset($_GET['export'])) {
+            $report->exportToCsv($result);
+        }
+
+        $data['general_ledger'] = $result;
+    }
+
+    $this->view('report/GeneralLedger', $data);
+}
+
+/**
+ * Journal entry listing with expandable line detail.
+ */
+public function JournalEntries()
+{
+    $helper = new Helper();
+    $range = $this->resolveReportDates(
+        $_GET['from_date'] ?? null,
+        $_GET['to_date'] ?? null,
+        date('Y-m-01'),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
+
+    require_once '../app/models/Reports/JournalEntriesReport.php';
+    $reportModel = new JournalEntriesReport();
+
+    $data = [
+        'title'             => 'Journal Entries',
+        'from_date'         => $from_date,
+        'to_date'           => $to_date,
+        'reference_type'    => $_GET['reference_type'] ?? '',
+        'branch_id'         => isset($_GET['branch_id']) && $_GET['branch_id'] !== '' ? (int)$_GET['branch_id'] : null,
+        'reversed'          => $_GET['reversed'] ?? '',
+        'created_by'        => isset($_GET['created_by']) && $_GET['created_by'] !== '' ? (int)$_GET['created_by'] : null,
+        'search_q'          => trim((string)($_GET['q'] ?? '')),
+        'branches'          => $helper->Get_All_Active_Branches(),
+        'journal_creators'  => $reportModel->getJournalCreators(),
+    ];
+    $this->attachReportPeriodMeta($data, $range);
+
+    if (isset($_GET['search']) || isset($_GET['export'])) {
+        $result = $reportModel->listEntries([
+            'from_date'      => $from_date,
+            'to_date'        => $to_date,
+            'reference_type' => $data['reference_type'] ?: null,
+            'branch_id'      => $data['branch_id'],
+            'reversed'       => $data['reversed'],
+            'created_by'     => $data['created_by'],
+            'search'         => $data['search_q'] ?: null,
+        ]);
+
+        if (isset($_GET['export'])) {
+            $reportModel->exportToCsv($result);
+        }
+
+        $data['journal_entries'] = $result;
+    }
+
+    $this->view('report/JournalEntries', $data);
+}
+
+/**
+ * Gross Margin — revenue vs COGS with delivery / invoice date basis (W6).
+ */
+public function grossMargin()
+{
+    RouteAccess::require('ReportController', 'grossMargin');
+
+    $helper = new Helper();
+    $input = array_merge($_GET, $_POST);
+
+    $range = $this->resolveReportDates(
+        $input['from_date'] ?? null,
+        $input['to_date'] ?? null,
+        date('Y-m-01'),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
+
+    $branch_id = isset($input['branch_id']) && $input['branch_id'] !== ''
+        ? (int)$input['branch_id']
+        : Helper::sessionBranchId();
+    $date_basis = ($input['date_basis'] ?? 'delivery') === 'invoice' ? 'invoice' : 'delivery';
+    $group_by = ($input['group_by'] ?? 'invoice') === 'product' ? 'product' : 'invoice';
+    $salesman_id = (int)($input['salesman_id'] ?? 0);
+
+    $data = [
+        'title'       => 'Gross Margin',
+        'from_date'   => $from_date,
+        'to_date'     => $to_date,
+        'branch_id'   => $branch_id,
+        'date_basis'  => $date_basis,
+        'group_by'    => $group_by,
+        'salesman_id' => $salesman_id,
+        'branches'    => $helper->Get_All_Active_Branches(),
+        'salesmen'    => $helper->All_Active_Employees(),
+    ];
+    $this->attachReportPeriodMeta($data, $range);
+
+    $searched = isset($input['search']) || isset($input['export']);
+
+    if ($searched) {
+        require_once '../app/models/Reports/GrossMarginReport.php';
+        $reportModel = new GrossMarginReport();
+        $result = $reportModel->run([
+            'from_date'   => $from_date,
+            'to_date'     => $to_date,
+            'branch_id'   => $branch_id,
+            'date_basis'  => $date_basis,
+            'salesman_id' => $salesman_id,
+            'group_by'    => $group_by,
+        ]);
+
+        if (!empty($input['export'])) {
+            $reportModel->exportCsv($result);
+            return;
+        }
+
+        $data['report'] = $result;
+    }
+
+    $data['searched'] = $searched;
+
+    $this->view('Report/GrossMargin', $data);
+}
+
 
 
 public function PayableAging()
 {
-    $a = new Helper();
+    $helper = new Helper();
+    $as_of_date = $this->resolveAsOfDate($_GET['as_of_date'] ?? null, date('Y-m-d'));
+    $branch_id = isset($_GET['branch_id']) && $_GET['branch_id'] !== ''
+        ? (int)$_GET['branch_id']
+        : null;
 
-    $data['branches']  = $a->Get_All_Active_Branches();
-    $data['suppliers'] = $a->Get_All_Active_Supplier();
+    if (!$helper->canOverrideBranch()) {
+        $branch_id = Helper::sessionBranchId() ?: null;
+    }
 
-    // Input Handling
-    $as_of_date = $_GET['as_of_date'] ?? date('Y-m-d');
-    $branch_id  = $_GET['branch_id'] ?? null;
-
-    $data['as_of_date'] = $as_of_date;
-    $data['branch_id']  = $branch_id;
+    $data = [
+        'title'               => 'Payable Aging',
+        'as_of_date'          => $as_of_date,
+        'branch_id'           => $branch_id,
+        'branches'            => $helper->Get_All_Active_Branches(),
+        'can_override_branch' => $helper->canOverrideBranch(),
+    ];
+    if ($period = InvestigationMode::getReportPeriod()) {
+        $data['investigation_report_period'] = $period['label'];
+    }
 
     if (isset($_GET['search']) || isset($_GET['export'])) {
-
         require_once '../app/models/Reports/PayableAgingReport.php';
         $report = new PayableAgingReport();
-
         $result = $report->getPayableAging($as_of_date, $branch_id);
 
         if (isset($_GET['export'])) {
             $report->exportPayableAging($result);
         }
 
-        $data['aging_data'] = $result;
+        $data['aging_report'] = $result;
     }
 
     $this->view('report/PayableAging', $data);
+}
+
+public function ReceivableAging()
+{
+    $helper = new Helper();
+    $as_of_date = $this->resolveAsOfDate($_GET['as_of_date'] ?? null, date('Y-m-d'));
+    $branch_id = isset($_GET['branch_id']) && $_GET['branch_id'] !== ''
+        ? (int)$_GET['branch_id']
+        : null;
+
+    if (!$helper->canOverrideBranch()) {
+        $branch_id = Helper::sessionBranchId() ?: null;
+    }
+
+    $data = [
+        'title'               => 'Receivable Aging',
+        'as_of_date'          => $as_of_date,
+        'branch_id'           => $branch_id,
+        'branches'            => $helper->Get_All_Active_Branches(),
+        'can_override_branch' => $helper->canOverrideBranch(),
+    ];
+    if ($period = InvestigationMode::getReportPeriod()) {
+        $data['investigation_report_period'] = $period['label'];
+    }
+
+    if (isset($_GET['search']) || isset($_GET['export'])) {
+        require_once '../app/models/Reports/ReceivableAgingReport.php';
+        $report = new ReceivableAgingReport();
+        $result = $report->getReceivableAging($as_of_date, $branch_id);
+
+        if (isset($_GET['export'])) {
+            $report->exportReceivableAging($result);
+        }
+
+        $data['aging_report'] = $result;
+    }
+
+    $this->view('report/ReceivableAging', $data);
 }
 
 
@@ -327,8 +749,14 @@ public function ProductMovement()
     // Support POST (multi filters) + GET
     $input = array_merge($_GET, $_POST);
 
-    $from_date = $input['from_date'] ?? date('Y-m-d', strtotime('-90 days'));
-    $to_date   = $input['to_date']   ?? date('Y-m-d');
+    $range = $this->resolveReportDates(
+        $input['from_date'] ?? null,
+        $input['to_date'] ?? null,
+        date('Y-m-d', strtotime('-90 days')),
+        date('Y-m-d')
+    );
+    $from_date = $range['from'];
+    $to_date = $range['to'];
 
     $branch_ids = [];
     if (isset($input['branch_ids'])) {
@@ -361,6 +789,7 @@ public function ProductMovement()
 
     $data['from_date']      = $from_date;
     $data['to_date']        = $to_date;
+    $this->attachReportPeriodMeta($data, $range);
     $data['branch_ids']     = $branch_ids;
     $data['warehouse_ids']  = $warehouse_ids;
     $data['category_ids']   = $category_ids;
@@ -437,8 +866,14 @@ public function ProductMovement()
         $a = new Helper();
         $input = array_merge($_GET, $_POST);
 
-        $from_date = $input['from_date'] ?? date('Y-m-d', strtotime('-90 days'));
-        $to_date   = $input['to_date']   ?? date('Y-m-d');
+        $range = $this->resolveReportDates(
+            $input['from_date'] ?? null,
+            $input['to_date'] ?? null,
+            date('Y-m-d', strtotime('-90 days')),
+            date('Y-m-d')
+        );
+        $from_date = $range['from'];
+        $to_date = $range['to'];
 
         $branch_ids = $this->parseIds($input['branch_ids'] ?? []);
         $warehouse_ids = $this->parseIds($input['warehouse_ids'] ?? []);
@@ -468,9 +903,46 @@ public function ProductMovement()
 
     private function parseIds($val)
     {
-        if (is_array($val)) return array_filter(array_map('intval', $val));
-        if ($val) return array_filter(array_map('intval', explode(',', $val)));
-        return [];
+        if (is_array($val)) {
+            $ids = array_filter(array_map('intval', $val));
+        } elseif ($val) {
+            $ids = array_filter(array_map('intval', explode(',', $val)));
+        } else {
+            $ids = [];
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @return array{from: string, to: string, clamped: bool, label: ?string}
+     */
+    private function resolveReportDates(?string $from, ?string $to, string $defaultFrom, string $defaultTo): array
+    {
+        $period = InvestigationMode::getReportPeriod();
+        if ($period !== null) {
+            return InvestigationMode::clampReportDates(
+                $from ?? $period['from'],
+                $to ?? $period['to']
+            );
+        }
+
+        return InvestigationMode::clampReportDates(
+            $from ?? $defaultFrom,
+            $to ?? $defaultTo
+        );
+    }
+
+    private function attachReportPeriodMeta(array &$data, array $range): void
+    {
+        if (!empty($range['label'])) {
+            $data['investigation_report_period'] = $range['label'];
+        }
+    }
+
+    private function resolveAsOfDate(?string $asOf, string $default): string
+    {
+        return InvestigationMode::clampAsOfDate($asOf ?? $default);
     }
 
     // ============================================================
@@ -490,8 +962,14 @@ public function ProductMovement()
 
         $input = array_merge($_GET, $_POST);
 
-        $from_date = $input['from_date'] ?? date('Y-m-01');
-        $to_date   = $input['to_date']   ?? date('Y-m-d');
+        $range = $this->resolveReportDates(
+            $input['from_date'] ?? null,
+            $input['to_date'] ?? null,
+            date('Y-m-01'),
+            date('Y-m-d')
+        );
+        $from_date = $range['from'];
+        $to_date = $range['to'];
 
         $branch_ids = $this->parseIds($input['branch_ids'] ?? []);
         $salesman_ids = $this->parseIds($input['salesman_ids'] ?? []);
@@ -525,6 +1003,7 @@ public function ProductMovement()
             'salesman_ids' => $salesman_ids,
             'category_ids' => $category_ids,
             'comparison' => $comparison,
+            'investigation_report_period' => $range['label'] ?? null,
             'kpis' => [
                 'mtd_revenue' => $mtdRevenue,
                 'ytd_revenue' => $ytdRevenue,
@@ -647,8 +1126,14 @@ public function ProductMovement()
         $helper = new Helper();
         $input = array_merge($_GET, $_POST);
 
-        $from_date = $input['from_date'] ?? date('Y-m-d', strtotime('-90 days'));
-        $to_date   = $input['to_date']   ?? date('Y-m-d');
+        $range = $this->resolveReportDates(
+            $input['from_date'] ?? null,
+            $input['to_date'] ?? null,
+            date('Y-m-d', strtotime('-90 days')),
+            date('Y-m-d')
+        );
+        $from_date = $range['from'];
+        $to_date = $range['to'];
 
         $branch_ids = $this->parseIds($input['branch_ids'] ?? []);
         $salesman_ids = $this->parseIds($input['salesman_ids'] ?? []);
@@ -676,6 +1161,7 @@ public function ProductMovement()
             'from_date' => $from_date, 'to_date' => $to_date,
             'branch_ids' => $branch_ids, 'salesman_ids' => $salesman_ids, 'category_ids' => $category_ids,
             'min_deal_size' => $min_deal_size, 'max_deal_size' => $max_deal_size, 'min_prob' => $min_prob,
+            'investigation_report_period' => $range['label'] ?? null,
             'kpis' => [
                 'total_pipeline' => $totalPipeline,
                 'weighted_revenue' => $weightedRevenue,
@@ -757,8 +1243,14 @@ public function ProductMovement()
         $helper = new Helper();
         $input = array_merge($_GET, $_POST);
 
-        $from_date = $input['from_date'] ?? date('Y-m-d', strtotime('-365 days'));
-        $to_date   = $input['to_date']   ?? date('Y-m-d');
+        $range = $this->resolveReportDates(
+            $input['from_date'] ?? null,
+            $input['to_date'] ?? null,
+            date('Y-m-d', strtotime('-365 days')),
+            date('Y-m-d')
+        );
+        $from_date = $range['from'];
+        $to_date = $range['to'];
 
         $branch_ids = $this->parseIds($input['branch_ids'] ?? []);
         $salesman_ids = $this->parseIds($input['salesman_ids'] ?? []);
@@ -774,6 +1266,7 @@ public function ProductMovement()
         $data = [
             'from_date' => $from_date, 'to_date' => $to_date,
             'branch_ids' => $branch_ids, 'salesman_ids' => $salesman_ids, 'category_ids' => $category_ids, 'min_revenue' => $min_revenue,
+            'investigation_report_period' => $range['label'] ?? null,
             'kpis' => [
                 'total_active' => $metrics['active_customers'],
                 'avg_clv' => $metrics['avg_clv'],

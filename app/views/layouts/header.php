@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../../../core/Auth.php';
+
 $branchName = $_SESSION['branch_name'] ?? 'No Branch';
 $userName   = $_SESSION['employee_name'] ?? 'User';
 $role       = $_SESSION['role'] ?? '';
@@ -50,6 +52,12 @@ $role       = $_SESSION['role'] ?? '';
                     </li>
 
                     <li>
+                        <a class="dropdown-item" href="<?= BASE_URL ?>user/two_factor">
+                            <i class="fas fa-shield-halved me-2"></i> Two-Factor Authentication
+                        </a>
+                    </li>
+
+                    <li>
                         <a class="dropdown-item" href="<?= BASE_URL ?>settings">
                             <i class="fas fa-cog me-2"></i> Settings
                         </a>
@@ -58,9 +66,14 @@ $role       = $_SESSION['role'] ?? '';
                     <li><hr class="dropdown-divider"></li>
 
                     <li>
-                        <a class="dropdown-item text-danger" href="<?= BASE_URL ?>auth/logout">
-                            <i class="fas fa-sign-out-alt me-2"></i> Logout
-                        </a>
+                        <form method="POST" action="<?= BASE_URL ?>auth/logout" class="m-0">
+                            <input type="hidden" name="csrf_token"
+                                   value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>">
+                            <button type="submit"
+                                    class="dropdown-item text-danger border-0 bg-transparent w-100 text-start">
+                                <i class="fas fa-sign-out-alt me-2"></i> Logout
+                            </button>
+                        </form>
                     </li>
                 </ul>
             </div>

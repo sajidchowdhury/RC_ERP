@@ -17,9 +17,16 @@ ob_start();
             <span class="purch-index-tag"><i class="fas fa-building me-1"></i><?= htmlspecialchars($branchName, ENT_QUOTES) ?></span>
         </div>
         <div class="purch-index-hero-actions">
+            <a href="<?= BASE_URL ?>SalesReturn" class="btn btn-outline-light btn-sm me-1"><i class="fas fa-undo-alt me-1"></i> Returns</a>
             <a href="<?= BASE_URL ?>Damage" class="btn btn-light btn-sm"><i class="fas fa-arrow-left me-1"></i> List</a>
         </div>
     </header>
+
+    <div class="alert alert-light border mb-3 small">
+        <i class="fas fa-info-circle me-1 text-primary"></i>
+        <strong>Sales journey:</strong> Damaged goods from a customer return are written off automatically when warehouse confirms the return with condition <em>Damage</em> — no separate entry needed.
+        Use this form only for other warehouse shrinkage (breakage in store, expiry, etc.).
+    </div>
 
     <div class="st-section-card p-3">
         <form id="damageForm">

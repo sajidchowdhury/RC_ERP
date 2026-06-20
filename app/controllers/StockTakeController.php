@@ -6,6 +6,7 @@ require_once '../app/models/StockTakeModel.php';
 require_once '../app/models/StockTakeAuditModel.php';
 require_once '../app/models/Reports/StockTakeVarianceReport.php';
 require_once '../app/helpers/Helper.php';
+require_once '../app/helpers/StockGlAuditHelper.php';
 
 class StockTakeController extends BaseController {
 
@@ -83,23 +84,22 @@ class StockTakeController extends BaseController {
             && $pendingWh === 0
             && $countedWh > 0;
 
-        $journalEntry = null;
-        if (!empty($session['journal_entry_id']) || ($session['status'] ?? '') === 'adjusted') {
-            $journalEntry = $this->model->getJournalEntryForSession((int)$id);
-        }
-
         $audit = (new StockTakeAuditModel())->runSessionChecks((int)$id);
 
         $this->view('StockTake/details', [
-            'title'         => 'Stock Take #' . ($session['session_code'] ?? ''),
-            'session'       => $session,
-            'warehouses'    => $warehouses,
-            'progress'      => $progress,
-            'variances'     => $variances,
-            'movements'     => $movements,
-            'can_post'      => $canPost,
-            'journal_entry' => $journalEntry,
-            'session_audit' => $audit,
+            'title'          => 'Stock Take #' . ($session['session_code'] ?? ''),
+            'session'        => $session,
+            'warehouses'     => $warehouses,
+            'progress'       => $progress,
+            'variances'      => $variances,
+            'movements'      => $movements,
+            'can_post'       => $canPost,
+            'journal_blocks' => StockGlAuditHelper::stockTakeJournalBlocks(
+                $session,
+                (float)($progress['loss_value'] ?? 0),
+                (float)($progress['gain_value'] ?? 0)
+            ),
+            'session_audit'  => $audit,
         ]);
     }
 

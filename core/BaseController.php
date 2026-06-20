@@ -39,7 +39,25 @@ class BaseController {
     }
 
     protected function isAdmin() {
-        return isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
+        return Auth::isAdmin();
+    }
+
+    protected function isSuperadmin() {
+        return Auth::isSuperadmin();
+    }
+
+    /**
+     * Gate a controller/action to admin-tier (admin or superadmin) users.
+     */
+    protected function requireAdmin() {
+        Auth::requireAdmin();
+    }
+
+    /**
+     * Gate a controller/action to superadmin only.
+     */
+    protected function requireSuperadmin() {
+        Auth::requireSuperadmin();
     }
 
     /**
@@ -92,8 +110,19 @@ class BaseController {
                 );
             }
 
-            // For normal form submissions (like login)
+            // For normal form submissions
             Flash::set('Security token expired or invalid. Please refresh the page and try again.', 'error');
+
+            if (Auth::isLoggedIn()) {
+                $referer = trim((string)($_SERVER['HTTP_REFERER'] ?? ''));
+                $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+                if ($referer !== '' && $host !== '' && str_contains($referer, $host)) {
+                    header('Location: ' . $referer);
+                    exit;
+                }
+                $this->redirect('dashboard');
+            }
+
             $this->redirect('auth/login');
             exit;
         }

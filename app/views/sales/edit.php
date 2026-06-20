@@ -128,17 +128,37 @@ if ($blockedReason !== '') {
                         <label class="form-label small text-muted mb-1">Product name or code</label>
                         <div class="position-relative mb-3">
                             <input type="text" id="productSearch" class="form-control sales-search-input"
-                                   placeholder="Search product..." autocomplete="off">
+                                   placeholder="Scan barcode or search product..." autocomplete="off">
                             <div id="productSuggestions" class="sales-suggest-list"></div>
                         </div>
 
                         <div id="BranchStock" class="sales-stock-banner d-none"></div>
 
+                        <div id="priceRangePanel" class="sales-price-band d-none" aria-live="polite">
+                            <div class="sales-price-band-head">
+                                <span class="sales-price-band-title"><i class="fas fa-tags"></i> Selling range</span>
+                                <button type="button" class="btn btn-sm btn-outline-primary sales-use-default-btn" id="btnUseDefaultRate" title="Set rate to default">
+                                    Use default
+                                </button>
+                            </div>
+                            <div class="sales-price-band-labels">
+                                <span>Min <b id="priceBandMin">0</b></span>
+                                <span class="sales-price-band-default">Default <b id="priceBandDefault">0</b></span>
+                                <span>Max <b id="priceBandMax">0</b></span>
+                            </div>
+                            <div class="sales-price-band-track-wrap">
+                                <div class="sales-price-band-track">
+                                    <div class="sales-price-band-fill" id="priceBandFill"></div>
+                                    <div class="sales-price-band-default-mark" id="priceBandDefaultMark" title="Default price"></div>
+                                    <div class="sales-price-band-thumb" id="priceBandThumb"></div>
+                                </div>
+                            </div>
+                            <div id="priceRangeStatus" class="sales-price-band-status sales-price-ok">Rate is within allowed range</div>
+                        </div>
+
                         <div class="sales-entry-toolbar">
                             <div class="sales-entry-group sales-entry-rate">
-                                <label class="sales-entry-label" for="sales_rate">
-                                    Rate (৳) <span class="sales-rec-hint">Rec. <b id="recommandedprice">0</b></span>
-                                </label>
+                                <label class="sales-entry-label" for="sales_rate">Rate (৳)</label>
                                 <input type="number" step="0.01" id="sales_rate" class="form-control sales-entry-input" placeholder="0.00" inputmode="decimal">
                             </div>
                             <div class="sales-entry-group sales-entry-qty">

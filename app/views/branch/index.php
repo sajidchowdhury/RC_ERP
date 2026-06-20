@@ -4,6 +4,7 @@ $title = $title ?? 'Branch Management';
 $showDeleted = !empty($showDeleted);
 $stats = $stats ?? ['active' => 0, 'inactive' => 0, 'warehouses' => 0, 'employees' => 0];
 $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
+$canManage = Auth::isAdmin();
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 
@@ -34,12 +35,14 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                     <i class="fas fa-box-archive me-1"></i> Inactive (<?= (int)($stats['inactive'] ?? 0) ?>)
                 </a>
             <?php endif; ?>
+            <?php if ($canManage): ?>
             <a href="<?= BASE_URL ?>branch/audit" class="btn btn-outline-light btn-sm">
                 <i class="fas fa-clock-rotate-left me-1"></i> Audit
             </a>
             <a href="<?= BASE_URL ?>branch/create" class="btn btn-light btn-sm">
                 <i class="fas fa-plus me-1"></i> New branch
             </a>
+            <?php endif; ?>
         </div>
     </header>
 
@@ -121,8 +124,10 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 
 <script>
 const BRANCH_BASE = "<?= BASE_URL ?>branch";
+const WH_BASE = "<?= BASE_URL ?>warehouse";
 const BRANCH_SHOW_DELETED = <?= $showDeleted ? 'true' : 'false' ?>;
 const BRANCH_CSRF = "<?= $csrfToken ?>";
+const BRANCH_CAN_MANAGE = <?= $canManage ? 'true' : 'false' ?>;
 
 function branchInitial(name) {
     const n = (name || '').trim();
@@ -139,14 +144,22 @@ function branchStatusPill(isActive) {
 function branchMiniStats(row) {
     const wh = parseInt(row.warehouse_count, 10) || 0;
     const em = parseInt(row.employee_count, 10) || 0;
+    const whStat = wh > 0
+        ? `<a href="${WH_BASE}?branch=${row.id}" class="branch-mini-stat text-decoration-none" title="View warehouses for this branch"><i class="fas fa-warehouse"></i> ${wh}</a>`
+        : `<span class="branch-mini-stat text-muted" title="No warehouses"><i class="fas fa-warehouse"></i> ${wh}</span>`;
     return `<div class="branch-mini-stats">
-        <span class="branch-mini-stat" title="Active warehouses"><i class="fas fa-warehouse"></i> ${wh}</span>
+        ${whStat}
         <span class="branch-mini-stat" title="Active employees"><i class="fas fa-users"></i> ${em}</span>
     </div>`;
 }
 
 function branchActionHtml(id, isActive) {
     let html = '<div class="branch-action-bar">';
+    html += `<a href="${BRANCH_BASE}/show/${id}" class="btn-action view" title="Branch hub"><i class="fas fa-sitemap"></i></a>`;
+    if (!BRANCH_CAN_MANAGE) {
+        html += '</div>';
+        return html;
+    }
     html += `<a href="${BRANCH_BASE}/edit/${id}" class="btn-action edit" title="Edit"><i class="fas fa-pen"></i></a>`;
     if (BRANCH_SHOW_DELETED) {
         html += `<button type="button" class="btn-action restore" title="Restore" onclick="restoreBranch(${id})"><i class="fas fa-rotate-left"></i></button>`;
@@ -166,7 +179,7 @@ function renderBranchNameCell(row) {
     return `<div class="branch-name-cell">
         <div class="branch-avatar">${branchInitial(row.branch_name)}</div>
         <div>
-            <div class="name">${escapeHtml(row.branch_name)}</div>
+            <div class="name"><a href="${BRANCH_BASE}/show/${row.id}" class="text-decoration-none text-dark">${escapeHtml(row.branch_name)}</a></div>
             ${addr}
         </div>
     </div>`;
@@ -301,7 +314,7 @@ function renderBranchCards(table) {
                     <div class="card-head">
                         <div class="branch-avatar">${branchInitial(row.branch_name)}</div>
                         <div class="flex-grow-1">
-                            <div class="fw-semibold">${escapeHtml(row.branch_name)}</div>
+                            <div class="fw-semibold"><a href="${BRANCH_BASE}/show/${row.id}" class="text-decoration-none text-dark">${escapeHtml(row.branch_name)}</a></div>
                             <div class="card-meta"><span class="branch-code-pill">${escapeHtml(row.branch_code)}</span></div>
                             <div class="card-meta">${escapeHtml(contact)}</div>
                         </div>

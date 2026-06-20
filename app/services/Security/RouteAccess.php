@@ -24,7 +24,7 @@ class RouteAccess
 
     public static function allows(string $controller, string $action): bool
     {
-        if (Auth::isAdmin()) {
+        if (Auth::hasAdminRouteBypass()) {
             return true;
         }
 
@@ -37,7 +37,7 @@ class RouteAccess
     }
 
     /**
-     * JSON 403 when role is not permitted (call at start of sensitive actions).
+     * Abort when role is not permitted (JSON for API/AJAX, redirect for HTML).
      */
     public static function require(string $controller, string $action): void
     {
@@ -45,13 +45,34 @@ class RouteAccess
             return;
         }
 
-        require_once __DIR__ . '/../../../core/ApiResponse.php';
-        ApiResponse::emit(
-            ApiResponse::error(
-                'You do not have permission to perform this action.',
-                ApiResponse::CODE_FORBIDDEN
-            ),
-            403
-        );
+        self::deny();
+    }
+
+    private static function deny(): void
+    {
+        $message = 'You do not have permission to perform this action.';
+
+        if (self::isAjaxOrJsonRequest()) {
+            require_once __DIR__ . '/../../../core/ApiResponse.php';
+            ApiResponse::emit(
+                ApiResponse::error($message, ApiResponse::CODE_FORBIDDEN),
+                403
+            );
+        }
+
+        require_once __DIR__ . '/../../../core/Flash.php';
+        Flash::set($message, 'error');
+        header('Location: ' . BASE_URL . 'dashboard');
+        exit;
+    }
+
+    private static function isAjaxOrJsonRequest(): bool
+    {
+        $xhr = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
+            && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+        $contentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
+
+        return $xhr || str_contains($contentType, 'application/json');
     }
 }

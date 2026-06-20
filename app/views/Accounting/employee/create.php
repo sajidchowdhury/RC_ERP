@@ -4,6 +4,8 @@ $title = $title ?? 'New employee transaction';
 $employees = $employees ?? [];
 $banks = $banks ?? [];
 $today = $today ?? date('Y-m-d');
+$branch_name = $branch_name ?? 'Branch';
+$employeePayableStatus = $employee_payable_status ?? ['configured' => true, 'count' => 1];
 $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
@@ -15,8 +17,8 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
     <header class="branch-hub-hero">
         <div>
             <h1><i class="fas fa-plus me-2"></i>New employee transaction</h1>
-            <p>Record advance, loan, salary, repayment, or deduction.</p>
-            <span class="hero-badge"><i class="fas fa-book"></i> employee_ledger</span>
+            <p>Record advance, loan, salary, repayment, or deduction — manual voucher only.</p>
+            <span class="hero-badge"><i class="fas fa-building"></i> <?= htmlspecialchars($branch_name, ENT_QUOTES) ?> · Tk</span>
         </div>
         <div class="branch-hub-actions">
             <a href="<?= BASE_URL ?>EmployeeTransaction" class="btn btn-outline-light btn-sm">
@@ -25,9 +27,22 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         </div>
     </header>
 
+    <?php if (empty($employeePayableStatus['configured'])): ?>
+    <div class="alert alert-warning border-0 shadow-sm mb-3">
+        <i class="fas fa-triangle-exclamation me-1"></i>
+        <?php if ((int)($employeePayableStatus['count'] ?? 0) === 0): ?>
+        No active chart account with nature <code>employee_payable</code> — GL posting will fail until one is configured.
+        <?php else: ?>
+        Multiple active <code>employee_payable</code> ledgers found (<?= (int)$employeePayableStatus['count'] ?>).
+        Keep exactly one control account in the chart of accounts.
+        <?php endif; ?>
+        <a href="<?= BASE_URL ?>ledger" class="alert-link ms-1">Open chart of accounts</a>
+    </div>
+    <?php endif; ?>
+
     <div class="branch-form-layout has-aside">
         <div class="branch-form-panel">
-            <form id="employeeTransactionForm" class="needs-validation" novalidate>
+            <form id="employeeTransactionForm" class="needs-validation" novalidate aria-label="New employee transaction">
                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
 
                 <div class="branch-form-section">
@@ -51,7 +66,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                             </select>
                         </div>
                     </div>
-                    <div id="dueSummary" class="emp-txn-due-banner d-none mt-3"></div>
+                    <div id="dueSummary" class="emp-txn-due-banner d-none mt-3" role="status" aria-live="polite"></div>
                 </div>
 
                 <div class="branch-form-section">
@@ -75,7 +90,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                         </div>
                         <div class="col-12 col-md-4">
                             <label class="form-label" for="amount">Amount (Tk) <span class="text-danger">*</span></label>
-                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required>
+                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required aria-required="true" inputmode="decimal" autocomplete="off">
                         </div>
                         <div class="col-12 col-md-4">
                             <label class="form-label" for="transaction_date">Date</label>
@@ -126,13 +141,21 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         </div>
 
         <aside class="branch-form-aside">
-            <div class="aside-title">Tips</div>
-            <div class="branch-aside-tip">
-                <strong>Outflow</strong> (advance, loan, salary, adjustment) — money out; employee balance increases.<br>
-                <strong>Inflow</strong> (repayment, deduction) — money in; balance decreases.
+            <div class="aside-title">GL preview</div>
+            <div id="accounting_preview" class="branch-preview-card" role="region" aria-label="GL posting preview" aria-live="polite">
+                <p class="text-muted small mb-0">Select employee, type, and amount to preview double-entry.</p>
+            </div>
+            <div class="branch-aside-tip mt-3">
+                <i class="fas fa-arrow-up-right-from-square me-1"></i>
+                <strong>Outflow</strong> (advance, loan, salary, adjustment) — Dr employee payable, Cr cash/bank.
             </div>
             <div class="branch-aside-tip mt-2">
-                Configure a chart account with nature <code>employee_payable</code> for GL posting.
+                <i class="fas fa-arrow-down me-1"></i>
+                <strong>Inflow</strong> (repayment, deduction) — Dr cash/bank, Cr employee payable.
+            </div>
+            <div class="branch-aside-tip mt-2 text-muted">
+                <i class="fas fa-clock me-1"></i>
+                Future HR phase: salary sheets from attendance, late deductions, and loan/advance recovery will post through this same control account — not built in this phase.
             </div>
             <div class="branch-preview-card mt-3">
                 <div class="aside-title mb-2">Preview</div>
@@ -145,7 +168,11 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
     </div>
 </div>
 
-<script>window.ET_BOOT = { baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?> };</script>
+<script>window.ET_BOOT = {
+    baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?>,
+    glLabels: <?= json_encode($gl_preview_labels ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) ?>
+};</script>
+<script src="<?= BASE_URL ?>assets/js/accounting-journal-preview.js"></script>
 <script src="<?= BASE_URL ?>assets/js/EmployeeTransaction.js"></script>
 
 <?php

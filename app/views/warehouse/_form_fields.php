@@ -62,7 +62,7 @@ $selectedBranch = (int)($warehouse['branch_id'] ?? 0);
         <span class="icon-wrap teal"><i class="fas fa-power-off"></i></span>
         Status
     </div>
-    <p class="small text-muted mb-2">Cannot deactivate while stock quantity remains in this warehouse.</p>
+    <p class="small text-muted mb-2">Cannot deactivate while stock, pending dispatches, or an active stock take remain. Branch cannot be changed while stock or pending dispatches exist.</p>
     <div class="branch-status-toggle">
         <div class="status-option">
             <input type="radio" name="is_active" id="whActive" value="1"

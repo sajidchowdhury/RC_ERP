@@ -63,6 +63,14 @@ public function getUserMenus($user_id) {
         return array_values($tree); // Return as indexed array
     }
 
+    /**
+     * All active menus as a hierarchical tree for permission editor.
+     */
+    public function getAllMenusHierarchical(): array
+    {
+        return $this->buildMenuTree($this->getAllMenus());
+    }
+
         public function getAllMenus() {
         $this->db->query("
             SELECT 

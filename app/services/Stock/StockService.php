@@ -88,8 +88,38 @@ class StockService
         return $this->availability->getBranchAvailableQty($productId, $branchId, $excludeInvoiceId);
     }
 
+    public function getWarehouseAvailableQty(int $productId, int $warehouseId, ?int $excludeInvoiceId = null): float
+    {
+        return $this->availability->getWarehouseAvailableQty($productId, $warehouseId, $excludeInvoiceId);
+    }
+
     /**
-     * First active warehouse for a branch (used to seed dispatch warehouse_id at invoice finalize).
+     * @param array<int, float> $qtyByProduct product_id => qty (single warehouse)
+     * @return string[] error messages
+     */
+    public function assertWarehouseProductsAvailable(
+        int $warehouseId,
+        array $qtyByProduct,
+        ?int $excludeInvoiceId = null
+    ): array {
+        $errors = [];
+        foreach ($qtyByProduct as $productId => $requestedQty) {
+            $productId = (int)$productId;
+            if ($productId <= 0) {
+                continue;
+            }
+            $available = $this->getWarehouseAvailableQty($productId, $warehouseId, $excludeInvoiceId);
+            if ($requestedQty > $available + 0.0001) {
+                $errors[] = "Product ID {$productId}: requested " . number_format((float)$requestedQty, 2)
+                    . ', available ' . number_format($available, 2);
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * First active warehouse for a branch (legacy fallback; draft dispatches no longer seed this at finalize).
      */
     public function getDefaultWarehouseId(int $branchId): ?int
     {

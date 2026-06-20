@@ -1,25 +1,2 @@
-/* Supplier payment slip — extends invoice-print */
-.customer-payment-slip-body.supp-payment-slip-body .cps-banner {
-    border-color: #fed7aa;
-    background: linear-gradient(135deg, #fff7ed, #ffedd5);
-}
-
-.customer-payment-slip-body.supp-payment-slip-body .cps-amount-hero.payment,
-.customer-payment-slip-body.supp-payment-slip-body .cps-amount-hero.advance {
-    border-color: #fdba74;
-}
-
-.customer-payment-slip-body.supp-payment-slip-body .cps-type-badge.payment {
-    background: #ffedd5;
-    color: #c2410c;
-}
-
-.customer-payment-slip-body.supp-payment-slip-body .cps-type-badge.advance {
-    background: #fef3c7;
-    color: #b45309;
-}
-
-.customer-payment-slip-body.supp-payment-slip-body .cps-type-badge.receive {
-    background: #d1fae5;
-    color: #047857;
-}
+/* @deprecated — merged into entity-voucher-slip-print.css */
+@import url('entity-voucher-slip-print.css');

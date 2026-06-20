@@ -10,6 +10,7 @@
 
     const STATUS_LABELS = {
         all: 'All invoices',
+        awaiting_payment: 'Awaiting payment',
         open_pipeline: 'In progress',
         pending: 'Draft / pending',
         godown_copy: 'Godown issued',
@@ -39,7 +40,7 @@
         const state = saved && !boot.forceUrlParams ? saved : boot;
 
         if (state.date_preset) setActivePreset(state.date_preset, false);
-        else applyDatePreset('today', false);
+        else applyDatePreset('week', false);
 
         if (state.date_from) $('#filterDateFrom').val(state.date_from);
         if (state.date_to) $('#filterDateTo').val(state.date_to);
@@ -171,7 +172,7 @@
         $('#filterChallanStatus').val('all');
         $('#filterSearch').val('');
         $('#filterSmartSort').prop('checked', true);
-        applyDatePreset('today');
+        applyDatePreset('week');
         syncStatusChips();
         if (invoiceTable) invoiceTable.search('').draw();
         persistAndReload(true);
@@ -201,6 +202,7 @@
     function updateChipCounts(data) {
         const map = {
             all: data.total ?? 0,
+            awaiting_payment: data.awaiting_payment ?? 0,
             open_pipeline: data.open_pipeline ?? 0,
             pending: data.pending ?? 0,
             godown_copy: data.godown_copy ?? 0,
@@ -225,7 +227,7 @@
             tags.push(`<span class="filter-tag"><i class="fas fa-search"></i> "${escapeHtml(p.search)}"</span>`);
         }
         if (p.smart_sort === '1') {
-            tags.push('<span class="filter-tag"><i class="fas fa-sort-amount-down"></i> Priority sort</span>');
+            tags.push('<span class="filter-tag"><i class="fas fa-sort-amount-down"></i> Unpaid first</span>');
         }
 
         bar.innerHTML = tags.join('') +
@@ -264,7 +266,7 @@
                     orderable: false,
                     className: 'text-center',
                     render: (d, t, row) => {
-                        if (row.status === 'draft' && !parseInt(row.call_a_day || 0, 10)) {
+                        if (!parseInt(row.call_a_day || 0, 10)) {
                             return `<input type="checkbox" class="form-check-input invoice-check" value="${row.id}">`;
                         }
                         return '';
@@ -294,7 +296,23 @@
                 {
                     data: 'total_amount',
                     className: 'text-end',
-                    render: d => parseFloat(d || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                    render: d => formatMoney(d),
+                },
+                {
+                    data: 'paid_amount',
+                    className: 'text-end',
+                    render: d => formatMoney(d),
+                },
+                {
+                    data: 'balance_due',
+                    className: 'text-end',
+                    render: (d, t, row) => {
+                        const due = parseFloat(d || 0);
+                        if (due < 0.01) {
+                            return '<span class="text-success">—</span>';
+                        }
+                        return `<span class="text-danger fw-semibold">${formatMoney(due)}</span>`;
+                    },
                 },
                 { data: 'status', render: d => invoiceStatusBadge(d) },
                 { data: null, orderable: false, className: 'text-center', render: (d, t, row) => buildInvoiceActions(row) },
@@ -316,29 +334,12 @@
 
         $('#callItADayBtn').on('click', function () {
             const ids = $('.invoice-check:checked').map(function () { return this.value; }).get();
-            if (!ids.length) {
-                Swal.fire('No Selection', 'Select at least one draft invoice.', 'warning');
-                return;
-            }
-            Swal.fire({
-                title: 'Call It A Day?',
-                text: `Mark ${ids.length} invoice(s) as called?`,
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: 'Yes, proceed',
-            }).then(result => {
-                if (!result.isConfirmed) return;
-                $.post(window.SALES_TODAY_BASE + 'sales/call_it_a_day', {
-                    invoice_ids: ids,
-                    csrf_token: window.CSRF_TOKEN || '',
-                }, data => {
-                    if (data.status === 'success') {
-                        Swal.fire('Done', data.message, 'success').then(() => invoiceTable.ajax.reload());
-                    } else {
-                        Swal.fire('Error', data.message || 'Failed', 'error');
-                    }
-                }, 'json');
-            });
+            confirmCallItADay(ids);
+        });
+
+        $(document).on('click', '.btn-call-it-a-day-one', function () {
+            const id = $(this).data('id');
+            confirmCallItADay([String(id)]);
         });
 
         $(document).on('click', '.btn-delete-invoice', function () {
@@ -390,9 +391,23 @@
                 });
         });
 
-        $(document).on('salesToday:paymentRecorded', function () {
+        $(document).on('salesToday:paymentRecorded', function (_e, detail) {
             if (invoiceTable) invoiceTable.ajax.reload(null, false);
             refreshSummary();
+
+            if (detail && detail.is_fully_paid && detail.invoiceId) {
+                Swal.fire({
+                    title: 'Fully paid',
+                    text: 'Remove this invoice from your collection list?',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: 'Call it a day',
+                    cancelButtonText: 'Keep on list',
+                }).then(result => {
+                    if (!result.isConfirmed) return;
+                    postCallItADay([String(detail.invoiceId)], true);
+                });
+            }
         });
 
         $(window).on('resize', () => {
@@ -418,7 +433,10 @@
             html += `<a href="${base}sales/edit/${row.id}" class="btn btn-outline-primary" title="Edit"><i class="fas fa-edit"></i></a>`;
             html += `<button type="button" class="btn btn-outline-danger btn-delete-invoice" data-id="${row.id}" title="Delete"><i class="fas fa-trash"></i></button>`;
         }
-        html += `<button type="button" class="btn btn-outline-success btn-receive-payment" data-id="${row.id}" title="Payment"><i class="fas fa-money-bill"></i></button>`;
+        html += `<button type="button" class="btn btn-outline-success btn-receive-payment" data-id="${row.id}" title="Receive payment"><i class="fas fa-money-bill"></i></button>`;
+        if (!parseInt(row.call_a_day || 0, 10)) {
+            html += `<button type="button" class="btn btn-outline-warning btn-call-it-a-day-one" data-id="${row.id}" title="Remove from list"><i class="fas fa-check-circle"></i></button>`;
+        }
         html += '</div>';
         return html;
     }
@@ -436,9 +454,10 @@
         data.each(row => {
             const statusClass = row.status === 'draft' ? 'status-draft'
                 : row.status === 'godown_issued' ? 'status-godown' : 'status-done';
-            const check = (row.status === 'draft' && !parseInt(row.call_a_day || 0, 10))
+            const check = !parseInt(row.call_a_day || 0, 10)
                 ? `<input type="checkbox" class="form-check-input invoice-check me-2" value="${row.id}">`
                 : '';
+            const due = parseFloat(row.balance_due || 0);
 
             html += `<div class="sales-today-mobile-card ${statusClass}">
                 <div class="d-flex justify-content-between align-items-start">
@@ -447,9 +466,14 @@
                 </div>
                 <div class="mt-1">${escapeHtml(row.shop_name || row.customer_name || '')}</div>
                 <div class="small text-muted">${escapeHtml(row.mobile || '')} · ${escapeHtml(row.salesman_name || '')}</div>
-                <div class="mt-2 d-flex justify-content-between align-items-center">
+                <div class="mt-2 d-flex justify-content-between align-items-center flex-wrap gap-1">
                     ${invoiceStatusBadge(row.status)}
-                    <strong>৳${parseFloat(row.total_amount || 0).toLocaleString()}</strong>
+                    <div class="text-end">
+                        <div class="small text-muted">Total ${formatMoney(row.total_amount)}</div>
+                        ${due >= 0.01
+                            ? `<strong class="text-danger">Due ${formatMoney(due)}</strong>`
+                            : '<strong class="text-success">Paid</strong>'}
+                    </div>
                 </div>
                 <div class="mt-2">${buildInvoiceActions(row)}</div>
             </div>`;
@@ -461,6 +485,52 @@
                 <p class="mb-0">No invoices for these filters</p>
                 <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="document.getElementById('clearFilters').click()">Reset filters</button>
             </div>`;
+    }
+
+    function formatMoney(value) {
+        return parseFloat(value || 0).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        });
+    }
+
+    function confirmCallItADay(ids) {
+        if (!ids.length) {
+            Swal.fire('No selection', 'Select at least one invoice to remove from your list.', 'warning');
+            return;
+        }
+        const label = ids.length === 1 ? 'this invoice' : `${ids.length} invoices`;
+        Swal.fire({
+            title: 'Call it a day?',
+            html: `Remove ${label} from your collection list?<br><small class="text-muted">Use this after payment is confirmed, or when you are sure payment will not come.</small>`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, remove',
+        }).then(result => {
+            if (!result.isConfirmed) return;
+            postCallItADay(ids, false);
+        });
+    }
+
+    function postCallItADay(ids, silent) {
+        $.post(window.SALES_TODAY_BASE + 'sales/call_it_a_day', {
+            invoice_ids: ids,
+            csrf_token: window.CSRF_TOKEN || '',
+        }, data => {
+            if (data.status === 'success') {
+                if (silent) {
+                    if (invoiceTable) invoiceTable.ajax.reload(null, false);
+                    refreshSummary();
+                } else {
+                    Swal.fire('Done', data.message, 'success').then(() => {
+                        if (invoiceTable) invoiceTable.ajax.reload();
+                        refreshSummary();
+                    });
+                }
+            } else if (!silent) {
+                Swal.fire('Error', data.message || 'Failed', 'error');
+            }
+        }, 'json');
     }
 
     function escapeHtml(str) {

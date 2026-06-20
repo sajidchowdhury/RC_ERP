@@ -7,13 +7,13 @@ foreach ($logs as $log) {
     $a = (string)($log['action'] ?? '');
     if (str_contains($a, 'created')) $countCreated++;
     elseif (str_contains($a, 'updated') || str_contains($a, 'password')) $countUpdated++;
-    elseif (str_contains($a, 'permission')) $countPerm++;
+    elseif (str_contains($a, 'permission') || str_contains($a, '2fa')) $countPerm++;
     else $countOther++;
 }
 function userAuditClass(string $action): string {
     if (str_contains($action, 'created')) return 'created';
     if (str_contains($action, 'updated') || str_contains($action, 'password')) return 'updated';
-    if (str_contains($action, 'permission') || str_contains($action, 'status') || str_contains($action, 'deleted')) return 'status';
+    if (str_contains($action, 'permission') || str_contains($action, '2fa') || str_contains($action, 'status') || str_contains($action, 'deleted')) return 'status';
     return 'other';
 }
 function userAuditLabel(string $action): string {
@@ -22,6 +22,9 @@ function userAuditLabel(string $action): string {
         str_contains($action, 'updated') => 'Updated',
         str_contains($action, 'status') => 'Status changed',
         str_contains($action, 'permission') => 'Permissions',
+        str_contains($action, 'user_2fa_enabled') => '2FA enabled',
+        str_contains($action, 'user_2fa_disabled') => '2FA disabled',
+        str_contains($action, 'user_2fa_admin_disabled') => '2FA admin recovery',
         str_contains($action, 'soft_deleted') => 'Deleted',
         str_contains($action, 'password') => 'Password',
         default => $action,
@@ -46,6 +49,7 @@ function userAuditDetails($details): string {
         </div>
         <div class="branch-hub-actions">
             <a href="<?= BASE_URL ?>user/create" class="btn btn-outline-light btn-sm"><i class="fas fa-plus me-1"></i> New user</a>
+            <a href="<?= BASE_URL ?>user/security_audit" class="btn btn-light btn-sm"><i class="fas fa-shield-halved me-1"></i> Unified audit</a>
             <a href="<?= BASE_URL ?>user" class="btn btn-light btn-sm"><i class="fas fa-arrow-left me-1"></i> Users</a>
         </div>
     </header>
@@ -58,7 +62,7 @@ function userAuditDetails($details): string {
     <div class="branch-hub-panel branch-audit-panel">
         <div class="table-responsive">
             <table class="table table-borderless mb-0 w-100" id="auditTable">
-                <thead><tr><th>When</th><th>User</th><th>Action</th><th>Target ID</th><th>Details</th><th>IP</th></tr></thead>
+                <thead><tr><th>When</th><th>Performed by</th><th>Action</th><th>Target ID</th><th>Details</th><th>IP</th></tr></thead>
                 <tbody>
                 <?php if (empty($logs)): ?>
                 <tr><td colspan="6" class="text-center text-muted py-5">No user audit logs yet.</td></tr>
@@ -66,7 +70,7 @@ function userAuditDetails($details): string {
                     $action = (string)($log['action'] ?? ''); ?>
                 <tr>
                     <td><small class="text-nowrap"><?= htmlspecialchars($log['timestamp'] ?? '', ENT_QUOTES) ?></small></td>
-                    <td><span class="badge rounded-pill bg-light text-dark border">#<?= (int)($log['performed_by'] ?? 0) ?></span></td>
+                    <td><span class="badge rounded-pill bg-light text-dark border"><?= htmlspecialchars((string)($log['performed_by_label'] ?? ('#' . (int)($log['performed_by'] ?? 0))), ENT_QUOTES) ?></span></td>
                     <td><span class="branch-audit-action <?= userAuditClass($action) ?>"><?= htmlspecialchars(userAuditLabel($action), ENT_QUOTES) ?></span></td>
                     <td><strong><?= htmlspecialchars((string)($log['target_user_id'] ?? '—'), ENT_QUOTES) ?></strong></td>
                     <td><?= userAuditDetails($log['details'] ?? []) ?></td>

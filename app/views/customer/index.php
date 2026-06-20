@@ -189,7 +189,7 @@ function custNameCell(row) {
     return `<div class="branch-name-cell">
         <div class="branch-avatar">${custInitial(shop)}</div>
         <div>
-            <div class="name">${custEscape(shop)}</div>
+            <div class="name"><a href="${CUST_BASE}/show/${row.id}" class="text-decoration-none text-reset">${custEscape(shop)}</a></div>
             ${person}
             ${mobile}
             ${sales ? '<div class="mt-1">' + sales + '</div>' : ''}
@@ -201,6 +201,7 @@ function custActionHtml(row) {
     const id = row.id;
     const name = (row.shop_name || row.customer_name || 'this customer').replace(/'/g, "\\'");
     let html = '<div class="branch-action-bar">';
+    html += `<a href="${CUST_BASE}/show/${id}" class="btn-action view" title="Hub"><i class="fas fa-circle-info"></i></a>`;
     html += `<a href="${CUST_BASE}/edit/${id}" class="btn-action edit" title="Edit"><i class="fas fa-pen"></i></a>`;
     if (CUST_SHOW_DELETED) {
         html += `<button type="button" class="btn-action restore" title="Restore" onclick="restoreCustomer(${id})"><i class="fas fa-rotate-left"></i></button>`;
@@ -382,7 +383,7 @@ function renderCustomerCards(table) {
                     <div class="card-head">
                         <div class="branch-avatar">${custInitial(row.shop_name)}</div>
                         <div class="flex-grow-1">
-                            <div class="fw-semibold">${custEscape(row.shop_name)}</div>
+                            <div class="fw-semibold"><a href="${CUST_BASE}/show/${row.id}" class="text-decoration-none text-reset">${custEscape(row.shop_name)}</a></div>
                             <div class="card-meta"><span class="branch-code-pill">${custEscape(row.customer_code)}</span></div>
                             ${row.customer_name ? `<div class="card-meta">${custEscape(row.customer_name)}</div>` : ''}
                             ${row.mobile ? `<div class="card-meta"><a href="tel:${custEscape(row.mobile)}">${custEscape(row.mobile)}</a></div>` : ''}
@@ -391,6 +392,7 @@ function renderCustomerCards(table) {
                         </div>
                     </div>
                     <div class="card-actions branch-action-bar">
+                        <a href="${CUST_BASE}/show/${row.id}" class="btn-action view"><i class="fas fa-circle-info"></i></a>
                         <a href="${CUST_BASE}/edit/${row.id}" class="btn-action edit"><i class="fas fa-pen"></i></a>
                         ${CUST_SHOW_DELETED
                             ? `<button type="button" class="btn-action restore" onclick="restoreCustomer(${row.id})"><i class="fas fa-rotate-left"></i></button>`

@@ -39,30 +39,29 @@ $ledgers = $ledgers ?? [];
         <div class="branch-stat-card"><div class="branch-stat-icon indigo"><i class="fas fa-calendar-day"></i></div><div><div class="stat-value">Tk <?= number_format((float)$stats['today'], 0) ?></div><div class="stat-label">Today</div></div></div>
     </div>
 
-    <nav class="branch-hub-quick">
-        <a href="<?= BASE_URL ?>ledger"><i class="fas fa-book"></i> Ledgers</a>
-        <a href="<?= BASE_URL ?>bank"><i class="fas fa-building-columns"></i> Banks</a>
-        <a href="<?= BASE_URL ?>OtherExpense"><i class="fas fa-arrow-up"></i> Other expense</a>
-    </nav>
+    <?php include __DIR__ . '/../../partials/accounting_quick_nav.php'; ?>
 
-    <div class="branch-hub-panel">
-        <div class="branch-hub-filters">
-            <div class="row g-3 align-items-end">
-                <div class="col-sm-3 col-md-2"><div class="filter-label">From</div><input type="date" id="fromDate" class="form-control form-control-sm" value="<?= htmlspecialchars($fromDate ?? '', ENT_QUOTES) ?>"></div>
-                <div class="col-sm-3 col-md-2"><div class="filter-label">To</div><input type="date" id="toDate" class="form-control form-control-sm" value="<?= htmlspecialchars($toDate ?? '', ENT_QUOTES) ?>"></div>
-                <div class="col-sm-3 col-md-2"><div class="filter-label">Income head</div><select id="filterLedger" class="form-select form-select-sm"><option value="">All</option><?php foreach ($ledgers as $l): ?><option value="<?= (int)$l['id'] ?>"><?= htmlspecialchars($l['ledger_name'], ENT_QUOTES) ?></option><?php endforeach; ?></select></div>
-                <div class="col-sm-3 col-md-2"><div class="filter-label">Mode</div><select id="filterPaymentMode" class="form-select form-select-sm"><option value="">All</option><option value="cash">Cash</option><option value="bank">Bank</option></select></div>
-                <div class="col-sm-3 col-md-2"><div class="filter-label">Status</div><select id="filterStatus" class="form-select form-select-sm"><option value="">All</option><option value="active">Active</option><option value="reversed">Reversed</option></select></div>
-                <div class="col-sm-auto"><button type="button" id="clearFilters" class="btn btn-outline-secondary btn-sm"><i class="fas fa-rotate-left me-1"></i> Reset</button></div>
-            </div>
+    <div class="branch-hub-panel acct-has-mobile-cards">
+        <div class="branch-hub-filters acct-touch-filters" role="search" aria-label="Filter other income vouchers">
+            <details class="acct-filter-drawer" open>
+                <summary><i class="fas fa-filter"></i> Filters</summary>
+                <div class="row g-3 align-items-end">
+                <div class="col-6 col-md-2"><label class="filter-label" for="fromDate">From</label><input type="date" id="fromDate" class="form-control form-control-sm" value="<?= htmlspecialchars($fromDate ?? '', ENT_QUOTES) ?>"></div>
+                <div class="col-6 col-md-2"><label class="filter-label" for="toDate">To</label><input type="date" id="toDate" class="form-control form-control-sm" value="<?= htmlspecialchars($toDate ?? '', ENT_QUOTES) ?>"></div>
+                <div class="col-6 col-md-2"><label class="filter-label" for="filterLedger">Income head</label><select id="filterLedger" class="form-select form-select-sm"><option value="">All</option><?php foreach ($ledgers as $l): ?><option value="<?= (int)$l['id'] ?>"><?= htmlspecialchars($l['ledger_name'], ENT_QUOTES) ?></option><?php endforeach; ?></select></div>
+                <div class="col-6 col-md-2"><label class="filter-label" for="filterPaymentMode">Mode</label><select id="filterPaymentMode" class="form-select form-select-sm"><option value="">All</option><option value="cash">Cash</option><option value="bank">Bank</option></select></div>
+                <div class="col-6 col-md-2"><label class="filter-label" for="filterStatus">Status</label><select id="filterStatus" class="form-select form-select-sm"><option value="">All</option><option value="active">Active</option><option value="reversed">Reversed</option></select></div>
+                <div class="col-12 col-md-auto"><button type="button" id="clearFilters" class="btn btn-outline-secondary btn-sm w-100" aria-label="Reset filters"><i class="fas fa-rotate-left me-1"></i> Reset</button></div>
+                </div>
+            </details>
         </div>
-        <div class="branch-hub-table-wrap d-none d-md-block">
+        <div class="branch-hub-table-wrap acct-desktop-table">
             <table class="table table-borderless mb-0 w-100" id="incomeTable">
                 <thead><tr><th>Date</th><th>Voucher</th><th>Head</th><th class="text-end">Amount</th><th>Received in</th><th>Status</th><th class="text-center">Actions</th></tr></thead>
                 <tbody></tbody>
             </table>
         </div>
-        <div id="incomeCards" class="d-md-none"></div>
+        <div id="incomeCards" class="acct-mobile-only acct-mobile-list" aria-live="polite" aria-label="Other income vouchers"></div>
     </div>
 </div>
 <script>window.showReversed = <?= !empty($showReversed) ? 'true' : 'false' ?>;</script>

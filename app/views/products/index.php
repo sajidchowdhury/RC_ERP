@@ -3,8 +3,9 @@ ob_start();
 $title = $title ?? 'Product Management';
 $showDeleted = !empty($showDeleted);
 $categories = $categories ?? [];
+$groups = $groups ?? [];
 $units = $units ?? [];
-$stats = $stats ?? ['active' => 0, 'inactive' => 0, 'categories' => 0, 'with_stock' => 0];
+$stats = $stats ?? ['active' => 0, 'inactive' => 0, 'categories' => 0, 'groups' => 0, 'with_stock' => 0];
 $publicUrl = $publicUrl ?? BASE_URL;
 $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 ?>
@@ -15,7 +16,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
     <header class="branch-hub-hero">
         <div>
             <h1><i class="fas fa-boxes-stacked me-2"></i><?= $showDeleted ? 'Inactive products' : 'Product catalog' ?></h1>
-            <p>Master SKUs for purchase, sales, godown, challan &amp; stock — prices via price history.</p>
+            <p>Master SKUs for purchase, sales, godown, challan &amp; stock — price ranges via price history.</p>
             <span class="hero-badge"><i class="fas fa-database"></i> warehouse_stock SSOT</span>
         </div>
         <div class="branch-hub-actions">
@@ -25,6 +26,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                 <a href="<?= BASE_URL ?>product?deleted=1" class="btn btn-outline-light btn-sm"><i class="fas fa-box-archive me-1"></i> Inactive (<?= (int)$stats['inactive'] ?>)</a>
             <?php endif; ?>
             <a href="<?= BASE_URL ?>product/audit" class="btn btn-outline-light btn-sm"><i class="fas fa-clock-rotate-left me-1"></i> Audit</a>
+            <a href="<?= BASE_URL ?>product/groups" class="btn btn-outline-light btn-sm"><i class="fas fa-globe me-1"></i> Groups</a>
             <a href="<?= BASE_URL ?>product/categories" class="btn btn-outline-light btn-sm"><i class="fas fa-tags me-1"></i> Categories</a>
             <a href="<?= BASE_URL ?>product/create" class="btn btn-light btn-sm"><i class="fas fa-plus me-1"></i> New product</a>
         </div>
@@ -43,6 +45,10 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         <div class="branch-stat-card">
             <div class="branch-stat-icon indigo"><i class="fas fa-tags"></i></div>
             <div><div class="stat-value"><?= (int)$stats['categories'] ?></div><div class="stat-label">Categories</div></div>
+        </div>
+        <div class="branch-stat-card">
+            <div class="branch-stat-icon amber"><i class="fas fa-globe"></i></div>
+            <div><div class="stat-value"><?= (int)$stats['groups'] ?></div><div class="stat-label">Groups</div></div>
         </div>
         <div class="branch-stat-card">
             <div class="branch-stat-icon amber"><i class="fas fa-cubes"></i></div>
@@ -66,6 +72,15 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                         <option value="">All categories</option>
                         <?php foreach ($categories as $cat): ?>
                             <option value="<?= (int)$cat['id'] ?>"><?= htmlspecialchars($cat['category_name'] ?? '', ENT_QUOTES) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-sm-4 col-md-2">
+                    <div class="filter-label">Group</div>
+                    <select id="filterGroup" class="form-select form-select-sm">
+                        <option value="">All groups</option>
+                        <?php foreach ($groups as $grp): ?>
+                            <option value="<?= (int)$grp['id'] ?>"><?= htmlspecialchars($grp['group_name'] ?? '', ENT_QUOTES) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -102,10 +117,11 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                         <th width="52"></th>
                         <th>Code</th>
                         <th>Product</th>
+                        <th>Group</th>
                         <th>Category</th>
                         <th>Unit</th>
                         <th class="text-end">Stock</th>
-                        <th class="text-end">Price</th>
+                        <th class="text-end">Price range</th>
                         <th class="text-center">Actions</th>
                     </tr>
                 </thead>
@@ -132,15 +148,28 @@ function prImg(row) {
     }
     return '<span class="product-img-placeholder"><i class="fas fa-image"></i></span>';
 }
+function prPriceCell(row) {
+    const min = parseFloat(row.min_rate) || 0;
+    const max = parseFloat(row.max_rate) || 0;
+    const def = parseFloat(row.current_price) || 0;
+    if (def <= 0) return '<span class="text-muted">—</span>';
+    if (min > 0 && max > 0 && (min !== max || min !== def)) {
+        return '<span class="product-price-tag">Tk '+def.toFixed(2)+'</span><br><small class="text-muted">'+min.toFixed(0)+'–'+max.toFixed(0)+'</small>';
+    }
+    return '<span class="product-price-tag">Tk '+def.toFixed(2)+'</span>';
+}
+function prAttrEsc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;');
+}
 function prActions(id, row) {
+    const name = prAttrEsc(row.product_name || '');
     let h = '<div class="branch-action-bar flex-wrap">';
     h += '<a href="'+PR_BASE+'/edit/'+id+'" class="btn-action edit" title="Edit"><i class="fas fa-pen"></i></a>';
     h += '<a href="'+PR_BASE+'/price_history/'+id+'" class="btn-action toggle-on" title="Prices"><i class="fas fa-tag"></i></a>';
-    h += '';
     if (PR_DELETED) {
-        h += '<button type="button" class="btn-action restore" onclick="restoreProduct('+id+')"><i class="fas fa-rotate-left"></i></button>';
+        h += '<button type="button" class="btn-action restore js-pr-restore" data-id="'+id+'"><i class="fas fa-rotate-left"></i></button>';
     } else {
-        h += '<button type="button" class="btn-action toggle-off" onclick="deleteProduct('+id+', '+JSON.stringify(row.product_name)+')"><i class="fas fa-trash"></i></button>';
+        h += '<button type="button" class="btn-action toggle-off js-pr-delete" data-id="'+id+'" data-name="'+name+'"><i class="fas fa-trash"></i></button>';
     }
     return h + '</div>';
 }
@@ -169,6 +198,7 @@ $(document).ready(function() {
             url: PR_BASE + (PR_DELETED ? '?deleted=1' : ''),
             data: d => {
                 d.filterCategory = $('#filterCategory').val();
+                d.filterGroup = $('#filterGroup').val();
                 d.filterUnit = $('#filterUnit').val();
                 if (PR_DELETED) d.includeDeleted = 1;
             }
@@ -183,16 +213,17 @@ $(document).ready(function() {
             { data: 'image', orderable: false, render: (d,t,r) => prImg(r) },
             { data: 'product_code', render: d => '<span class="branch-code-pill">'+prEsc(d)+'</span>' },
             { data: 'product_name', render: (d,t,r) => '<div class="fw-semibold">'+prEsc(d)+'</div><small class="text-muted">'+prEsc(r.product_code)+'</small>' },
+            { data: 'group_name', render: d => d ? '<span class="product-category-pill"><i class="fas fa-globe"></i> '+prEsc(d)+'</span>' : '<span class="text-muted">—</span>' },
             { data: 'category_name', render: d => d ? '<span class="product-category-pill"><i class="fas fa-tag"></i> '+prEsc(d)+'</span>' : '<span class="text-muted">—</span>' },
             { data: 'unit' },
             { data: 'total_stock', className: 'text-end', render: d => { const v=parseFloat(d)||0; return '<span class="'+(v>0?'product-stock-ok':'text-muted')+'">'+v.toLocaleString()+'</span>'; }},
-            { data: 'current_price', className: 'text-end', render: d => '<span class="product-price-tag">Tk '+parseFloat(d||0).toFixed(2)+'</span>' },
+            { data: null, className: 'text-end', orderable: false, render: (d,t,r) => prPriceCell(r) },
             { data: 'id', orderable: false, className: 'text-center', render: (d,t,r) => prActions(d,r) }
         ]
     });
 
-    $('#filterCategory, #filterUnit').on('change', () => table.ajax.reload());
-    $('#clearFilters').on('click', () => { $('#filterCategory,#filterUnit').val(''); clearSelection(); table.ajax.reload(); });
+    $('#filterCategory, #filterGroup, #filterUnit').on('change', () => table.ajax.reload());
+    $('#clearFilters').on('click', () => { $('#filterCategory,#filterGroup,#filterUnit').val(''); clearSelection(); table.ajax.reload(); });
 
     $(document).on('change', '#selectAll', function() {
         const on = this.checked;
@@ -211,6 +242,13 @@ $(document).ready(function() {
 
     window.productTable = table;
     $(window).on('resize', () => { clearTimeout(window._prRt); window._prRt = setTimeout(() => renderProductCards(table), 200); });
+
+    $(document).on('click', '.js-pr-delete', function() {
+        deleteProduct(parseInt(this.getAttribute('data-id'), 10), this.getAttribute('data-name') || '');
+    });
+    $(document).on('click', '.js-pr-restore', function() {
+        restoreProduct(parseInt(this.getAttribute('data-id'), 10));
+    });
 });
 
 function renderProductCards(table) {
@@ -220,7 +258,7 @@ function renderProductCards(table) {
     let html = data.length ? '' : '<div class="text-center text-muted py-4">No products found.</div>';
     data.each(function(row) {
         html += '<article class="product-mobile-card"><div class="card-head">'+prImg(row)+'<div class="flex-grow-1"><div class="fw-semibold">'+prEsc(row.product_name)+'</div><div class="card-meta"><span class="branch-code-pill">'+prEsc(row.product_code)+'</span></div></div></div>';
-        html += '<div class="stock-price-row"><span>Stock: <strong>'+(parseFloat(row.total_stock)||0).toLocaleString()+'</strong></span><span class="product-price-tag">Tk '+parseFloat(row.current_price||0).toFixed(2)+'</span></div>';
+        html += '<div class="stock-price-row"><span>Stock: <strong>'+(parseFloat(row.total_stock)||0).toLocaleString()+'</strong></span><span>'+prPriceCell(row)+'</span></div>';
         html += '<div class="card-actions">'+prActions(row.id, row)+'</div></article>';
     });
     el.innerHTML = html;
@@ -231,15 +269,31 @@ function reloadProductTable() {
     location.reload();
 }
 
+function prParseJsonResponse(res) {
+    return res.text().then(text => {
+        if (!text) {
+            throw new Error('Empty response from server.');
+        }
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            throw new Error('Invalid server response.');
+        }
+    });
+}
+
 function deleteProduct(id, name) {
-    Swal.fire({ title: 'Deactivate product?', html: 'Deactivate <strong>'+name+'</strong>? Can restore later.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#dc2626', confirmButtonText: 'Deactivate' })
+    const safeName = prEsc(name);
+    Swal.fire({ title: 'Deactivate product?', html: 'Deactivate <strong>'+safeName+'</strong>? Can restore later.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#dc2626', confirmButtonText: 'Deactivate' })
     .then(r => {
         if (!r.isConfirmed) return;
         fetch(PR_BASE+'/delete/'+id, { method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body: new URLSearchParams({csrf_token:PR_CSRF}) })
-        .then(res => res.json()).then(d => {
+        .then(prParseJsonResponse)
+        .then(d => {
             if (d.status==='success') Swal.fire('Done', d.message, 'success').then(reloadProductTable);
             else Swal.fire('Blocked', d.message||'Failed', 'error');
-        });
+        })
+        .catch(err => Swal.fire('Error', err.message || 'Request failed', 'error'));
     });
 }
 function restoreProduct(id) {
@@ -247,10 +301,12 @@ function restoreProduct(id) {
     .then(r => {
         if (!r.isConfirmed) return;
         fetch(PR_BASE+'/restore/'+id, { method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body: new URLSearchParams({csrf_token:PR_CSRF}) })
-        .then(res => res.json()).then(d => {
+        .then(prParseJsonResponse)
+        .then(d => {
             if (d.status==='success') Swal.fire('Restored', d.message, 'success').then(reloadProductTable);
             else Swal.fire('Error', d.message, 'error');
-        });
+        })
+        .catch(err => Swal.fire('Error', err.message || 'Request failed', 'error'));
     });
 }
 function bulkAction(action) {

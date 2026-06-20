@@ -3,6 +3,7 @@
 
 require_once '../core/BaseController.php';
 require_once '../app/models/SupplierTransactionModel.php';
+require_once '../app/services/Accounting/JournalPostingService.php';
 require_once '../app/helpers/Helper.php';
 require_once '../core/UserAudit.php';
 
@@ -18,7 +19,43 @@ class SupplierTransactionController extends BaseController {
     }
 
     public function index() {
-        $branchId = Helper::sessionBranchId() ?: (int)($_SESSION['branch_id'] ?? 0);
+        if (isset($_GET['draw'])) {
+            $filters = $this->resolveIndexFilters();
+            $response = $this->model->getPaymentsForDataTable(
+                $_GET,
+                $filters,
+                $this->resolveListBranchId()
+            );
+            header('Content-Type: application/json');
+            echo json_encode($response);
+            exit;
+        }
+
+        $filters = $this->resolveIndexFilters();
+        $listBranchId = $this->resolveListBranchId();
+        $showReversed = isset($_GET['reversed']) && $_GET['reversed'] == '1';
+
+        $filterSupplier = null;
+        $supplierId = (int)($filters['supplier_id'] ?? 0);
+        if ($supplierId > 0) {
+            $filterSupplier = $this->model->Get_Supplier_By_Id($supplierId);
+        }
+
+        $this->view('Accounting/supplier/index', [
+            'title'          => $showReversed ? 'Reversed supplier payments' : 'Supplier payments',
+            'branch_name'    => $_SESSION['branch_name'] ?? 'Branch',
+            'filters'        => $filters,
+            'filterSupplier' => $filterSupplier,
+            'stats'          => $this->model->getSupplierTransactionIndexStats($listBranchId),
+            'showReversed'   => $showReversed,
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveIndexFilters(): array
+    {
         $today = date('Y-m-d');
 
         if (!isset($_GET['date_from']) && !isset($_GET['date_to'])) {
@@ -33,41 +70,55 @@ class SupplierTransactionController extends BaseController {
             }
         }
 
-        $filters = [
+        $supplierId = trim((string)($_GET['supplier_id'] ?? ''));
+
+        return [
             'date_from'        => $dateFrom,
             'date_to'          => $dateTo,
             'transaction_type' => $_GET['transaction_type'] ?? 'all',
             'status'           => $_GET['status'] ?? 'all',
             'payment_mode'     => $_GET['payment_mode'] ?? 'all',
-            'supplier_id'      => $_GET['supplier_id'] ?? null,
+            'supplier_id'      => $supplierId !== '' ? (int)$supplierId : null,
         ];
+    }
 
-        $listBranchId = ($this->model->canOverrideBranch() && $branchId <= 0) ? null : ($branchId ?: null);
-        $transactions = $this->model->getFilteredTransactions($filters, $listBranchId);
+    private function resolveListBranchId(): ?int
+    {
+        $branchId = Helper::sessionBranchId() ?: (int)($_SESSION['branch_id'] ?? 0);
 
-        foreach ($transactions as &$row) {
-            $row['can_reverse'] = $this->model->canUserReversePayment($row);
+        return ($this->model->canOverrideBranch() && $branchId <= 0) ? null : ($branchId ?: null);
+    }
+
+    public function search_supplier() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            $this->sendJson(['status' => 'error', 'message' => 'Invalid request'], 405);
+            return;
         }
-        unset($row);
 
-        $this->view('Accounting/supplier/index', [
-            'title'        => 'Supplier payments',
-            'transactions' => $transactions,
-            'branch_name'  => $_SESSION['branch_name'] ?? 'Branch',
-            'filters'      => $filters,
-            'stats'        => $this->model->getSupplierTransactionIndexStats($listBranchId),
-            'suppliers'    => $this->model->getSuppliers(),
-        ]);
+        $term = trim((string)($_GET['term'] ?? ''));
+        $this->sendJson($this->model->Search_Suppliers($term));
     }
 
     public function create() {
+        $preselectSupplier = null;
+        $preselectId = (int)($_GET['supplier_id'] ?? 0);
+        if ($preselectId > 0) {
+            $row = $this->model->Get_Supplier_By_Id($preselectId);
+            if ($row && !empty($row['is_active'])) {
+                $preselectSupplier = $row;
+            }
+        }
+
+        $posting = new JournalPostingService();
+
         $this->view('Accounting/supplier/create', [
-            'title'       => 'New supplier payment',
-            'suppliers'   => $this->model->getSuppliers(),
-            'banks'       => $this->model->getBanks(),
-            'employees'   => $this->model->getEmployeesForUser(),
-            'today'       => date('Y-m-d'),
-            'branch_name' => $_SESSION['branch_name'] ?? 'Branch',
+            'title'             => 'New supplier payment',
+            'preselectSupplier' => $preselectSupplier,
+            'banks'             => $this->model->getBanks(),
+            'employees'         => $this->model->getEmployeesForUser(),
+            'today'             => date('Y-m-d'),
+            'branch_name'       => $_SESSION['branch_name'] ?? 'Branch',
+            'gl_preview_labels' => $posting->getSupplierTransactionGlPreviewLabels(),
         ]);
     }
 
@@ -191,6 +242,13 @@ class SupplierTransactionController extends BaseController {
             'journal_entry' => $this->model->getJournalEntryForPayment($paymentId),
             'supplier_due'  => $this->model->getSupplierDue((int)$transaction['supplier_id']),
             'can_reverse'   => $this->model->canUserReversePayment($transaction),
+        ]);
+    }
+
+    public function audit() {
+        $this->view('Accounting/supplier/audit', [
+            'title' => 'Supplier Payment Audit Logs',
+            'logs'  => $this->userAudit->getRecentLogs(300, 'supplier_transaction_'),
         ]);
     }
 }

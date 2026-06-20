@@ -35,10 +35,12 @@ ob_start();
             <a href="#today">Today's Sales</a>
             <a href="#godown">Godown &amp; Challan</a>
             <a href="#returns">Sales Returns</a>
+            <a href="#damage">Damage write-offs</a>
             <a href="#payment">Receive Payment</a>
             <a href="#scenarios">বাস্তব পরিস্থিতি</a>
             <a href="#roles">কে কী করবে</a>
             <a href="#faq">প্রশ্ন ও সমাধান</a>
+            <a href="<?= BASE_URL ?>sales/go_live_checklist" class="sales-guide-nav-external"><i class="fas fa-rocket me-1"></i> Go-Live Checklist</a>
         </nav>
 
         <main class="sales-guide-main">
@@ -110,6 +112,8 @@ ob_start();
                     <span class="sales-guide-step">④ Receive Payment — টাকা</span>
                     <span class="sales-guide-arrow">→</span>
                     <span class="sales-guide-step">⑤ (দরকার হলে) Sales Returns</span>
+                    <span class="sales-guide-arrow">→</span>
+                    <span class="sales-guide-step">⑥ Damage (auto or manual)</span>
                 </div>
                 <p class="sales-guide-lead mb-0">
                     ইনভয়েস সেভ করলেই কাস্টমারের <strong>বাকি বাড়তে</strong> পারে — এটা অফিসের হিসাবের জন্য। গাড়ি চলে গেলে চালানে ভাড়া/মোট টাকা বদলাতে পারে; সেলসম্যানকে কাস্টমারকে সেটা বোঝানো লাগতে পারে। টাকা আসলে আলাদা ধাপ — ইনভয়েস আর পেমেন্ট এক জিনিস নয়।
@@ -194,6 +198,12 @@ ob_start();
                         তাক থেকে মাল নামে; অফিসের হিসাবে খরচ/স্টক আপডেট হয়। সেলসের কাগজে ইনভয়েস «গুদাম পর্ব শেষ» ধরনের অবস্থায় যায়।
                     </div>
                 </div>
+                <div class="sales-guide-tip">
+                    <i class="fas fa-percent me-1"></i>
+                    <strong>Margin reporting:</strong> Revenue is recognized when the invoice is cut; COGS only when the challan completes.
+                    Gross margin is meaningful on a <strong>delivery (challan) date</strong> basis —
+                    <a href="<?= BASE_URL ?>Report/grossMargin?search=1&amp;date_basis=delivery">Gross Margin report</a>.
+                </div>
                 <p class="sales-guide-lead"><strong>পরিস্থিতি: ট্রাক ফিরে এল, মাল আনলেড</strong></p>
                 <ul class="mb-0" style="line-height:1.7;color:var(--sg-muted);">
                     <li>ম্যানেজার Reverse Challan করলে গুদামে মাল ফিরে যায়, ভাড়া-মোট আগের মতো হতে পারে।</li>
@@ -228,6 +238,34 @@ ob_start();
                     <i class="fas fa-lightbulb me-1"></i>
                     ভুল করে Confirm হয়ে গেলে সেলস চিন্তা করবেন না — অ্যাকাউন্ট্যান্ট/ম্যানেজার Reverse Return করতে পারেন; কিন্তু সেটা তৎক্ষণাৎ নয়, তাই আগে পরিমাণ দুবার চেক করুন।
                 </div>
+            </article>
+
+            <article id="damage" class="sales-guide-card" data-keywords="damage write-off shrinkage ভাঙা broken return sales journey">
+                <div class="sales-guide-card-head">
+                    <span class="sales-guide-menu-badge"><i class="fas fa-heart-crack"></i> Damage</span>
+                </div>
+                <h3>Damage write-offs — sales journey link</h3>
+                <p class="sales-guide-lead">
+                    When a customer returns <strong>damaged</strong> goods, warehouse confirms the return with condition <em>Damage</em> in <strong>Sales Returns → Confirm</strong>.
+                    The system automatically creates a linked <strong>Damage</strong> document, writes stock off at cost, and posts GL (Dr shrinkage / Cr inventory). You do <strong>not</strong> need a separate Damage entry for that case.
+                </p>
+                <div class="sales-guide-grid-3">
+                    <div class="sales-guide-pill can">
+                        <strong>From sales return (automatic)</strong>
+                        Confirm return with Damage lines → view linked write-off on return slip or <strong>Damage</strong> list (source: sales return).
+                    </div>
+                    <div class="sales-guide-pill result">
+                        <strong>Manual Damage menu</strong>
+                        Use <strong>Damage → Record damage</strong> for breakage found in warehouse, expiry, or other shrinkage <em>not</em> from a customer return.
+                    </div>
+                    <div class="sales-guide-pill cannot">
+                        <strong>Do not double-write-off</strong>
+                        If return confirm already created linked damage, do not record the same qty again in manual Damage.
+                    </div>
+                </div>
+                <p class="sales-guide-lead mb-0">
+                    Quick links from <strong>Today's Sales</strong>: Returns and Damage buttons in the header.
+                </p>
             </article>
 
             <article id="payment" class="sales-guide-card" data-keywords="payment পেমেন্ট receive reverse receipt বাকি টাকা">
@@ -308,7 +346,8 @@ ob_start();
                             <tr><td>নতুন বিক্রয়, কপি, বাকি</td><td>Salesman</td><td>Create Sales Invoice, Today's Sales</td></tr>
                             <tr><td>মাল বের, চালান, ট্রাক</td><td>Warehouse / Dispatcher</td><td>Godown &amp; Challan</td></tr>
                             <tr><td>ট্রাক ফিরে এল, চালান ভুল</td><td>Manager</td><td>Reverse Challan — গুদাম একাই করবেন না</td></tr>
-                            <tr><td>কাস্টমার মাল ফেরত</td><td>Salesman → Warehouse</td><td>এntry তারা, Confirm গুদাম</td></tr>
+                            <tr><td>কাস্টমার মাল ফেরত</td><td>Salesman → Warehouse</td><td>Entry তারা, Confirm গুদাম; damaged → auto Damage</td></tr>
+                            <tr><td>গুদামে ভাঙা / expiry (return ছাড়া)</td><td>Warehouse / Manager</td><td>Damage → Record damage</td></tr>
                             <tr><td>ভুল টাকা জমা, বিল উল্টাতে</td><td>Accountant / Manager</td><td>Reverse Payment</td></tr>
                             <tr><td>মাস শেষে হিসাব মিল না</td><td>Accountant</td><td>GL Reconciliation</td></tr>
                         </tbody>

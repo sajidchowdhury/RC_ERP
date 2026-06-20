@@ -3,7 +3,7 @@ ob_start();
 $title = $title ?? 'Edit Warehouse';
 $warehouse = $warehouse ?? [];
 $branches = $branches ?? [];
-$usage = $usage ?? ['total_qty' => 0, 'product_lines' => 0, 'has_stock' => false];
+$usage = $usage ?? ['total_qty' => 0, 'product_lines' => 0, 'has_stock' => false, 'pending_dispatches' => 0, 'active_stock_takes' => 0];
 $warehouseId = (int)($warehouse['id'] ?? 0);
 $isActive = !empty($warehouse['is_active']);
 $branchName = '';
@@ -31,6 +31,14 @@ foreach ($branches as $b) {
             </span>
         </div>
         <div class="branch-hub-actions">
+            <?php if (Auth::isAdmin()): ?>
+            <a href="<?= BASE_URL ?>warehouse/audit" class="btn btn-outline-light btn-sm">
+                <i class="fas fa-clock-rotate-left me-1"></i> Audit
+            </a>
+            <?php endif; ?>
+            <a href="<?= BASE_URL ?>warehouse/show/<?= $warehouseId ?>" class="btn btn-outline-light btn-sm">
+                <i class="fas fa-warehouse me-1"></i> Hub
+            </a>
             <a href="<?= BASE_URL ?>warehouse" class="btn btn-outline-light btn-sm">
                 <i class="fas fa-arrow-left me-1"></i> Back
             </a>
@@ -72,10 +80,23 @@ foreach ($branches as $b) {
                 <span><i class="fas fa-barcode text-muted me-1"></i> Product lines</span>
                 <strong><?= (int)($usage['product_lines'] ?? 0) ?></strong>
             </div>
+            <div class="branch-aside-stat">
+                <span><i class="fas fa-truck text-muted me-1"></i> Pending dispatches</span>
+                <strong><?= (int)($usage['pending_dispatches'] ?? 0) ?></strong>
+            </div>
+            <div class="branch-aside-stat">
+                <span><i class="fas fa-clipboard-check text-muted me-1"></i> Active stock takes</span>
+                <strong><?= (int)($usage['active_stock_takes'] ?? 0) ?></strong>
+            </div>
 
-            <?php if (!empty($usage['has_stock'])): ?>
+            <?php
+            $whBlocked = !empty($usage['has_stock'])
+                || ((int)($usage['pending_dispatches'] ?? 0) > 0)
+                || ((int)($usage['active_stock_takes'] ?? 0) > 0);
+            if ($whBlocked):
+            ?>
             <div class="branch-aside-tip">
-                Clear or transfer stock before deactivating this warehouse from the list toggle.
+                Clear stock, resolve pending dispatches, and finish active stock takes before deactivating or reassigning branch.
             </div>
             <?php endif; ?>
 

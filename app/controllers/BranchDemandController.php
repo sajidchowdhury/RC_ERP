@@ -3,7 +3,9 @@
 
 require_once '../core/BaseController.php';
 require_once '../app/models/BranchDemandModel.php';
+require_once '../app/models/BranchIntercompanyAuditModel.php';
 require_once '../app/helpers/Helper.php';
+require_once '../app/helpers/InterbranchGlAuditHelper.php';
 
 class BranchDemandController extends BaseController {
 
@@ -109,17 +111,36 @@ class BranchDemandController extends BaseController {
         }
 
         $data = [
-            'title'        => 'Demand Details #' . ($demand['demand_code'] ?? ''),
-            'demand'       => $demand,
-            'items'        => $items,
-            'toWarehouses' => $toWarehouses,
-            'myBranchId'   => $myBranchId,
-            'stock_trace'  => $stockTrace,
-            'settlements'  => $settlements,
-            'risk_flags'   => $riskFlags,
+            'title'          => 'Demand Details #' . ($demand['demand_code'] ?? ''),
+            'demand'         => $demand,
+            'items'          => $items,
+            'toWarehouses'   => $toWarehouses,
+            'myBranchId'     => $myBranchId,
+            'stock_trace'    => $stockTrace,
+            'settlements'    => $settlements,
+            'risk_flags'     => $riskFlags,
+            'journal_blocks' => InterbranchGlAuditHelper::demandJournalBlocks($demand),
         ];
 
         $this->view('BranchDemand/details', $data);
+    }
+
+    public function checklist() {
+        $audit = new BranchIntercompanyAuditModel();
+        $branchName = $_SESSION['branch_name'] ?? 'Branch';
+        if (Helper::sessionBranchId() === 0 && ($_SESSION['role'] ?? '') === 'admin') {
+            $branchName = 'All branches';
+        }
+
+        $this->view('BranchDemand/checklist', [
+            'title'       => 'Inter-branch GL Audit',
+            'report'      => $audit->runHealthChecks(),
+            'branch_name' => $branchName,
+        ]);
+    }
+
+    public function run_checks() {
+        $this->sendJson((new BranchIntercompanyAuditModel())->runHealthChecks());
     }
 
     public function weekly() {

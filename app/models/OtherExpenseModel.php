@@ -47,6 +47,12 @@ class OtherExpenseModel extends Helper {
             $expense_code = $this->generateOtherExpenseCode($branch_id);
             $expense_date = $post['expense_date'] ?? date('Y-m-d');
 
+            require_once __DIR__ . '/../services/Accounting/AccountingPeriodService.php';
+            $periodError = AccountingPeriodService::validatePostingDate($expense_date, $branch_id);
+            if ($periodError !== null) {
+                throw new Exception($periodError);
+            }
+
             $this->db->query("
                 INSERT INTO other_expenses
                 (expense_code, expense_date, ledger_id, amount, payment_mode, bank_id,

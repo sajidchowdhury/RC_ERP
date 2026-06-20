@@ -5,6 +5,7 @@ $showDeleted = !empty($showDeleted);
 $branches = $branches ?? [];
 $stats = $stats ?? ['active' => 0, 'inactive' => 0, 'branches' => 0, 'stock_qty' => 0];
 $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
+$canManage = Auth::isAdmin();
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/warehouse-theme.css">
@@ -36,9 +37,14 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                     <i class="fas fa-box-archive me-1"></i> Inactive (<?= (int)($stats['inactive'] ?? 0) ?>)
                 </a>
             <?php endif; ?>
+            <?php if ($canManage): ?>
+            <a href="<?= BASE_URL ?>warehouse/audit" class="btn btn-outline-light btn-sm">
+                <i class="fas fa-clock-rotate-left me-1"></i> Audit
+            </a>
             <a href="<?= BASE_URL ?>warehouse/create" class="btn btn-light btn-sm">
                 <i class="fas fa-plus me-1"></i> New warehouse
             </a>
+            <?php endif; ?>
         </div>
     </header>
 
@@ -124,8 +130,10 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 
 <script>
 const WH_BASE = "<?= BASE_URL ?>warehouse";
+const BRANCH_BASE = "<?= BASE_URL ?>branch";
 const WH_SHOW_DELETED = <?= $showDeleted ? 'true' : 'false' ?>;
 const WH_CSRF = "<?= $csrfToken ?>";
+const WH_CAN_MANAGE = <?= $canManage ? 'true' : 'false' ?>;
 
 function whEscape(str) {
     if (!str) return '';
@@ -160,9 +168,13 @@ function whStockCell(row) {
     </div>`;
 }
 
-function whBranchPill(name) {
+function whBranchPill(name, branchId) {
     if (!name) return '<span class="text-muted">—</span>';
-    return `<span class="branch-branch-pill"><i class="fas fa-building"></i> ${whEscape(name)}</span>`;
+    const label = `<i class="fas fa-building"></i> ${whEscape(name)}`;
+    if (branchId) {
+        return `<a href="${BRANCH_BASE}/show/${branchId}" class="branch-branch-pill text-decoration-none">${label}</a>`;
+    }
+    return `<span class="branch-branch-pill">${label}</span>`;
 }
 
 function whNameCell(row) {
@@ -172,7 +184,7 @@ function whNameCell(row) {
     return `<div class="branch-name-cell">
         <div class="branch-avatar">${whInitial(row.warehouse_name)}</div>
         <div>
-            <div class="name">${whEscape(row.warehouse_name)}</div>
+            <div class="name"><a href="${WH_BASE}/show/${row.id}" class="text-decoration-none text-dark">${whEscape(row.warehouse_name)}</a></div>
             ${addr}
         </div>
     </div>`;
@@ -180,6 +192,11 @@ function whNameCell(row) {
 
 function whActionHtml(id, isActive) {
     let html = '<div class="branch-action-bar">';
+    html += `<a href="${WH_BASE}/show/${id}" class="btn-action view" title="Warehouse hub"><i class="fas fa-warehouse"></i></a>`;
+    if (!WH_CAN_MANAGE) {
+        html += '</div>';
+        return html;
+    }
     html += `<a href="${WH_BASE}/edit/${id}" class="btn-action edit" title="Edit"><i class="fas fa-pen"></i></a>`;
     if (WH_SHOW_DELETED) {
         html += `<button type="button" class="btn-action restore" title="Restore" onclick="restoreWarehouse(${id})"><i class="fas fa-rotate-left"></i></button>`;
@@ -236,8 +253,8 @@ $(document).ready(function() {
             },
             {
                 data: 'branch_name',
-                render: function(data) {
-                    return whBranchPill(data);
+                render: function(data, type, row) {
+                    return whBranchPill(data, row.branch_id);
                 }
             },
             {
@@ -313,9 +330,9 @@ function renderWarehouseCards(table) {
                     <div class="card-head">
                         <div class="branch-avatar">${whInitial(row.warehouse_name)}</div>
                         <div class="flex-grow-1">
-                            <div class="fw-semibold">${whEscape(row.warehouse_name)}</div>
+                            <div class="fw-semibold"><a href="${WH_BASE}/show/${row.id}" class="text-decoration-none text-dark">${whEscape(row.warehouse_name)}</a></div>
                             <div class="card-meta"><span class="branch-code-pill">${whEscape(row.warehouse_code)}</span></div>
-                            <div class="card-meta">${whBranchPill(row.branch_name)}</div>
+                            <div class="card-meta">${whBranchPill(row.branch_name, row.branch_id)}</div>
                         </div>
                         ${whStatusPill(row.is_active)}
                     </div>

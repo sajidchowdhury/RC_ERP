@@ -113,56 +113,27 @@ $title = 'Income — ' . ($i['income_code'] ?? '');
     <?php endif; ?>
 
     <?php if ($journalEntry): ?>
-    <section class="branch-hub-panel mb-3 p-3">
-        <div class="fw-semibold mb-2"><i class="fas fa-book me-1"></i> General ledger</div>
-        <p class="small mb-2">
-            <strong><?= htmlspecialchars($journalEntry['entry_no'] ?? '', ENT_QUOTES) ?></strong>
-            <?php if (!empty($journalEntry['is_reversed'])): ?><span class="badge bg-danger">Reversed</span><?php endif; ?>
-        </p>
-        <div class="table-responsive">
-            <table class="table table-sm mb-0">
-                <thead class="table-light">
-                    <tr><th>Ledger</th><th class="text-end">Debit</th><th class="text-end">Credit</th></tr>
-                </thead>
-                <tbody>
-                <?php foreach ($journalEntry['lines'] ?? [] as $jl): ?>
-                <tr>
-                    <td><?= htmlspecialchars($jl['ledger_name'] ?? '', ENT_QUOTES) ?></td>
-                    <td class="text-end"><?= (float)($jl['debit'] ?? 0) > 0 ? number_format((float)$jl['debit'], 2) : '—' ?></td>
-                    <td class="text-end"><?= (float)($jl['credit'] ?? 0) > 0 ? number_format((float)$jl['credit'], 2) : '—' ?></td>
-                </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    </section>
+    <?php
+    $journal_entry = $journalEntry;
+    $journal_card_show_report_link = true;
+    include __DIR__ . '/../../partials/journal_entry_card.php';
+    ?>
     <?php elseif (!$isReversed): ?>
-    <div class="alert alert-warning mb-3">
-        <i class="fas fa-exclamation-triangle me-1"></i> No journal entry found for this income.
-    </div>
+    <?php
+    $journal_entry = null;
+    $journal_card_empty_message = 'No journal entry found for this income.';
+    include __DIR__ . '/../../partials/journal_entry_card.php';
+    ?>
     <?php endif; ?>
 
     <?php if ($isReversed && $reversingJournal): ?>
-    <section class="branch-hub-panel mb-3 p-3 border border-danger">
-        <div class="fw-semibold mb-2 text-danger"><i class="fas fa-rotate-left me-1"></i> Reversing journal</div>
-        <p class="small mb-2"><strong><?= htmlspecialchars($reversingJournal['entry_no'] ?? '', ENT_QUOTES) ?></strong></p>
-        <div class="table-responsive">
-            <table class="table table-sm mb-0">
-                <thead class="table-light">
-                    <tr><th>Ledger</th><th class="text-end">Debit</th><th class="text-end">Credit</th></tr>
-                </thead>
-                <tbody>
-                <?php foreach ($reversingJournal['lines'] ?? [] as $jl): ?>
-                <tr>
-                    <td><?= htmlspecialchars($jl['ledger_name'] ?? '', ENT_QUOTES) ?></td>
-                    <td class="text-end"><?= (float)($jl['debit'] ?? 0) > 0 ? number_format((float)$jl['debit'], 2) : '—' ?></td>
-                    <td class="text-end"><?= (float)($jl['credit'] ?? 0) > 0 ? number_format((float)$jl['credit'], 2) : '—' ?></td>
-                </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    </section>
+    <?php
+    $journal_entry = $reversingJournal;
+    $journal_card_title = 'Reversing journal';
+    $journal_card_css_class = 'border border-danger';
+    $journal_card_show_report_link = true;
+    include __DIR__ . '/../../partials/journal_entry_card.php';
+    ?>
     <?php endif; ?>
 
     <?php if (!empty($cashLedger)): ?>

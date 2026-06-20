@@ -4,6 +4,8 @@ $sections = $report['sections'] ?? [];
 $summary = $report['summary'] ?? [];
 $branchName = $branch_name ?? 'Branch';
 $ranAt = $report['ran_at'] ?? date('Y-m-d H:i:s');
+$missingAdjustmentJournals = $report['missing_adjustment_journals'] ?? [];
+$missingDamageJournals = $report['missing_damage_journals'] ?? [];
 
 $statusIcon = static function (string $status): string {
     return match ($status) {
@@ -73,6 +75,49 @@ ob_start();
         </section>
         <?php endforeach; ?>
     </div>
+
+    <?php if ($missingAdjustmentJournals !== []): ?>
+    <section class="purch-audit-section mt-3">
+        <div class="purch-audit-section-head"><i class="fas fa-balance-scale"></i> Adjustments missing journal (sample)</div>
+        <div class="table-responsive p-2">
+            <table class="table table-sm table-bordered mb-0">
+                <thead><tr><th>Code</th><th>Date</th><th>Type</th><th class="text-end">Amount</th><th></th></tr></thead>
+                <tbody>
+                <?php foreach ($missingAdjustmentJournals as $row): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($row['adjustment_code'] ?? '', ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($row['adjustment_date'] ?? '', ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars(ucfirst((string)($row['adjustment_type'] ?? '')), ENT_QUOTES) ?></td>
+                        <td class="text-end"><?= number_format((float)($row['total_amount'] ?? 0), 2) ?></td>
+                        <td><a href="<?= BASE_URL ?>StockAdjustment/details/<?= (int)($row['id'] ?? 0) ?>">GL detail</a></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($missingDamageJournals !== []): ?>
+    <section class="purch-audit-section mt-3">
+        <div class="purch-audit-section-head"><i class="fas fa-heart-crack"></i> Damage records missing journal (sample)</div>
+        <div class="table-responsive p-2">
+            <table class="table table-sm table-bordered mb-0">
+                <thead><tr><th>Code</th><th>Date</th><th class="text-end">Value</th><th></th></tr></thead>
+                <tbody>
+                <?php foreach ($missingDamageJournals as $row): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($row['damage_code'] ?? '', ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($row['damage_date'] ?? '', ENT_QUOTES) ?></td>
+                        <td class="text-end"><?= number_format((float)($row['total_value'] ?? 0), 2) ?></td>
+                        <td><a href="<?= BASE_URL ?>Damage/details/<?= (int)($row['id'] ?? 0) ?>">GL detail</a></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <?php endif; ?>
 </div>
 
 <script>

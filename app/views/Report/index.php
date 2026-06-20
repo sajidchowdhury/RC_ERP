@@ -28,6 +28,13 @@ $storyAccent = ['sales' => 'sales', 'finance' => 'finance', 'inventory' => 'inve
         </div>
     </header>
 
+    <?php if (!empty($investigation_period)): ?>
+    <div class="alert alert-warning rpt-no-print mb-3 py-2 small">
+        <i class="fas fa-user-secret me-1"></i>
+        Investigation mode — reports limited to <?= htmlspecialchars($investigation_period['label'], ENT_QUOTES) ?>.
+    </div>
+    <?php endif; ?>
+
     <?php if (!empty($featured)): ?>
     <section class="reports-featured rpt-no-print">
         <?php foreach (array_slice($featured, 0, 3) as $f):
@@ -71,6 +78,7 @@ $storyAccent = ['sales' => 'sales', 'finance' => 'finance', 'inventory' => 'inve
     <div class="reports-section-title">Report library</div>
     <div class="reports-bento" id="reportsBento">
         <?php foreach ($categories as $cat): ?>
+        <div id="cat-<?= htmlspecialchars($cat['id'], ENT_QUOTES) ?>" class="reports-category-block w-100" data-category-anchor="<?= htmlspecialchars($cat['id'], ENT_QUOTES) ?>"></div>
             <?php foreach ($cat['reports'] as $r):
                 $searchBlob = strtolower($r['title'] . ' ' . $r['tagline'] . ' ' . implode(' ', $r['tags'] ?? []));
                 $configureUrl = BASE_URL . ($r['route'] ?? '');

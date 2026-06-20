@@ -208,7 +208,11 @@
                                 window.open(receiptUrl, '_blank');
                             }
                         }
-                        $(document).trigger('salesToday:paymentRecorded', { invoiceId: invoiceId });
+                        $(document).trigger('salesToday:paymentRecorded', {
+                            invoiceId: invoiceId,
+                            is_fully_paid: !!(res && res.is_fully_paid),
+                            balance_due: parseFloat((res && res.balance_due) || 0),
+                        });
                     } else {
                         const msg = (res && res.message) ? res.message : 'Could not save payment.';
                         if (global.Swal) {

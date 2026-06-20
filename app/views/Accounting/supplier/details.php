@@ -104,9 +104,13 @@ $title = 'Payment — ' . ($t['payment_code'] ?? '');
         </div>
         <div class="supp-txn-detail-item">
             <div class="label">GL journal</div>
-            <div class="value"><?= !empty($t['journal_entry_id'])
-                ? 'JE #' . (int)$t['journal_entry_id']
-                : '<span class="text-muted">—</span>' ?></div>
+            <div class="value"><?php if (!empty($t['journal_entry_id'])): ?>
+                <a href="<?= BASE_URL ?>Report/JournalEntries?search=1&amp;reference_type=supplier_payment&amp;from_date=<?= urlencode((string)($t['payment_date'] ?? date('Y-m-01'))) ?>&amp;to_date=<?= urlencode((string)($t['payment_date'] ?? date('Y-m-d'))) ?>&amp;q=<?= urlencode((string)($journalEntry['entry_no'] ?? $t['journal_entry_id'])) ?>">
+                    <?= htmlspecialchars($journalEntry['entry_no'] ?? ('JE #' . (int)$t['journal_entry_id']), ENT_QUOTES) ?>
+                </a>
+            <?php else: ?>
+                <span class="text-muted">—</span>
+            <?php endif; ?></div>
         </div>
         <div class="supp-txn-detail-item">
             <div class="label">Created by</div>
@@ -123,31 +127,13 @@ $title = 'Payment — ' . ($t['payment_code'] ?? '');
     </div>
     <?php endif; ?>
 
-    <?php if ($journalEntry): ?>
-    <section class="branch-hub-panel mb-3 p-3">
-        <div class="fw-semibold mb-2"><i class="fas fa-book me-1"></i> General ledger</div>
-        <p class="small mb-2">
-            <strong><?= htmlspecialchars($journalEntry['entry_no'] ?? '', ENT_QUOTES) ?></strong>
-            <?php if (!empty($journalEntry['is_reversed'])): ?><span class="badge bg-danger">Reversed</span><?php endif; ?>
-        </p>
-        <div class="table-responsive">
-            <table class="table table-sm supp-txn-gl-table mb-0">
-                <thead class="table-light">
-                    <tr><th>Ledger</th><th class="text-end">Debit</th><th class="text-end">Credit</th></tr>
-                </thead>
-                <tbody>
-                <?php foreach ($journalEntry['lines'] ?? [] as $jl): ?>
-                <tr>
-                    <td><?= htmlspecialchars($jl['ledger_name'] ?? '', ENT_QUOTES) ?></td>
-                    <td class="text-end"><?= (float)($jl['debit'] ?? 0) > 0 ? number_format((float)$jl['debit'], 2) : '—' ?></td>
-                    <td class="text-end"><?= (float)($jl['credit'] ?? 0) > 0 ? number_format((float)$jl['credit'], 2) : '—' ?></td>
-                </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    </section>
-    <?php endif; ?>
+    <?php
+    $journal_entry = $journalEntry;
+    $journal_card_show_report_link = true;
+    $journal_card_reference_type = 'supplier_payment';
+    $journal_card_reference_id = $id;
+    include __DIR__ . '/../../partials/journal_entry_card.php';
+    ?>
 
     <section class="branch-hub-panel mb-3 p-3">
         <div class="fw-semibold mb-2"><i class="fas fa-book-open me-1"></i> Supplier ledger</div>

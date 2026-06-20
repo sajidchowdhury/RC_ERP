@@ -41,11 +41,62 @@
 .challan-branch-tag {
     display: inline-block;
     margin-top: 0.35rem;
+    margin-right: 0.35rem;
     padding: 0.15rem 0.55rem;
     background: rgba(255, 255, 255, 0.2);
     border-radius: 6px;
     font-size: 0.78rem;
     font-weight: 600;
+}
+
+.challan-journey-steps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    margin-top: 0.55rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.challan-journey-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.challan-journey-step .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.22);
+    font-size: 0.7rem;
+}
+
+.challan-journey-arrow {
+    opacity: 0.6;
+    font-size: 0.6rem;
+}
+
+.challan-queue-badge {
+    display: inline-block;
+    margin-top: 0.35rem;
+    margin-right: 0.35rem;
+    padding: 0.2rem 0.6rem;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--ch-primary-dark);
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.challan-queue-badge--ready {
+    background: #fef3c7;
+    color: #92400e;
 }
 
 .challan-hero-actions .btn {

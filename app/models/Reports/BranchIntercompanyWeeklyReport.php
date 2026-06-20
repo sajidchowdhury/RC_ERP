@@ -575,17 +575,17 @@ class BranchIntercompanyWeeklyReport extends ReportModel
                 p.product_name,
                 bdi.cost_rate AS locked_rate,
                 (
-                    SELECT ph.sales_rate
+                    SELECT ph.default_rate
                     FROM product_price_history ph
                     WHERE ph.product_id = bdi.product_id
-                    ORDER BY ph.effective_from DESC, ph.id DESC
+                    ORDER BY ph.effective_from DESC, ph.created_at DESC, ph.id DESC
                     LIMIT 1
                 ) AS catalog_rate,
                 ROUND(bdi.cost_rate - (
-                    SELECT ph.sales_rate
+                    SELECT ph.default_rate
                     FROM product_price_history ph
                     WHERE ph.product_id = bdi.product_id
-                    ORDER BY ph.effective_from DESC, ph.id DESC
+                    ORDER BY ph.effective_from DESC, ph.created_at DESC, ph.id DESC
                     LIMIT 1
                 ), 2) AS rate_gap
             FROM branch_demand_items bdi

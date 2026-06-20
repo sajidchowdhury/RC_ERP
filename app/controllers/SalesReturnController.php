@@ -7,6 +7,8 @@ require_once '../app/models/WarehouseModel.php';
 require_once '../app/models/BranchModel.php';
 require_once '../app/helpers/Helper.php';
 require_once '../core/UserAudit.php';
+require_once '../app/services/Notification/SalesTelegramNotifier.php';
+require_once '../app/helpers/SalesGlAuditHelper.php';
 
 class SalesReturnController extends BaseController {
 
@@ -169,15 +171,21 @@ class SalesReturnController extends BaseController {
                 'item_count'       => count($items),
                 'reason'           => $data['reason'],
             ]);
+
+            SalesTelegramNotifier::safe(function () use ($return_id) {
+                (new SalesTelegramNotifier())->notifyReturnCreated((int)$return_id);
+            });
+
             $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
                 && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
             if ($isAjax) {
                 $slipBase = defined('PUBLIC_URL') ? PUBLIC_URL : BASE_URL;
                 $this->sendJson([
-                    'status'    => 'success',
-                    'message'   => 'Sales return created. Pending warehouse confirmation.',
-                    'return_id' => (int)$return_id,
-                    'slip_url'  => $slipBase . 'SalesReturn/slip/' . (int)$return_id,
+                    'status'      => 'success',
+                    'message'     => 'Sales return created. Pending warehouse confirmation.',
+                    'return_id'   => (int)$return_id,
+                    'slip_url'    => $slipBase . 'SalesReturn/slip/' . (int)$return_id,
+                    'confirm_url' => $slipBase . 'SalesReturn/confirm/' . (int)$return_id,
                 ]);
             }
             $_SESSION['success'] = "Sales Return created successfully! Pending warehouse confirmation.";
@@ -256,8 +264,24 @@ class SalesReturnController extends BaseController {
             'item_count'       => count($items),
             'journal_entry_id' => $result['journal_entry_id'] ?? null,
             'cogs_amount'      => $result['cogs_amount'] ?? null,
+            'linked_damage_ids'=> $result['linked_damage_ids'] ?? [],
         ]);
-        $_SESSION['success'] = "Return confirmed. Stock updated and customer credit note posted.";
+
+        $confirmedBy = (int)($_SESSION['user_id'] ?? 0);
+        SalesTelegramNotifier::safe(function () use ($return_id, $confirmedBy) {
+            (new SalesTelegramNotifier())->notifyReturnReceived((int)$return_id, $confirmedBy);
+        });
+
+        $msg = 'Return confirmed. Stock updated and customer credit note posted.';
+        if (!empty($result['linked_damages'])) {
+            $codes = array_map(static fn($d) => $d['damage_code'] ?? '', $result['linked_damages']);
+            $codes = array_filter($codes);
+            if ($codes !== []) {
+                $msg .= ' Linked damage write-off: ' . implode(', ', $codes) . '.';
+            }
+            $_SESSION['return_damage_links'] = $result['linked_damages'];
+        }
+        $_SESSION['success'] = $msg;
         $this->redirect('SalesReturn');
     } else {
         $_SESSION['error'] = $result['message'] ?? $this->returnModel->getLastError() ?: 'Failed to confirm return.';
@@ -265,6 +289,30 @@ class SalesReturnController extends BaseController {
     }
 }
 
+
+    /**
+     * Sales return GL audit detail (Phase 5A).
+     * URL: SalesReturn/details/{id}
+     */
+    public function details($id = null) {
+        if (!$id) {
+            $this->redirect('SalesReturn');
+            return;
+        }
+
+        $return = $this->returnModel->getReturnById((int)$id);
+        if (!$return) {
+            $_SESSION['error'] = 'Return not found or access denied.';
+            $this->redirect('SalesReturn');
+            return;
+        }
+
+        $this->view('SalesReturn/details', [
+            'title'          => 'Return — ' . ($return['return_code'] ?? ''),
+            'return'         => $return,
+            'journal_blocks' => SalesGlAuditHelper::returnJournalBlocks($return),
+        ]);
+    }
 
     public function slip($id = null) {
         if (!$id) {

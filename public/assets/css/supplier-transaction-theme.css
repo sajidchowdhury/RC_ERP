@@ -141,3 +141,86 @@
     font-variant-numeric: tabular-nums;
     color: #9a3412;
 }
+
+.supp-txn-supplier-picker {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+.supp-txn-search-input:focus {
+    border-color: #c2410c;
+    box-shadow: 0 0 0 3px rgba(194, 65, 12, 0.15);
+}
+
+.supp-txn-search-input.is-locked {
+    background: #f8fafc;
+    cursor: default;
+}
+
+.supp-txn-suggest-list {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 1060;
+    max-height: 280px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+    margin-top: 4px;
+}
+
+.supp-txn-suggest-list.show {
+    display: block;
+}
+
+.supp-txn-suggest-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: #fff;
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.supp-txn-suggest-item:hover {
+    background: #fff7ed;
+}
+
+.supp-txn-suggest-item .suggest-title {
+    font-weight: 600;
+    font-size: 0.92rem;
+    display: block;
+}
+
+.supp-txn-suggest-item .suggest-meta {
+    font-size: 0.78rem;
+    color: #64748b;
+    display: block;
+}
+
+.supp-txn-suggest-empty {
+    padding: 0.75rem 0.9rem;
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.supp-txn-recents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.supp-txn-recents.is-hidden {
+    display: none;
+}
+
+.supp-txn-recents .btn {
+    font-size: 0.78rem;
+    padding: 0.2rem 0.55rem;
+}

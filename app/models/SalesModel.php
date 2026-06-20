@@ -44,6 +44,14 @@ class SalesModel extends Helper
         return $this->Search_Product_With_Stock($term, $branch_id);
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function getProductByExactCode(string $code, int $branch_id)
+    {
+        return $this->Search_Product_By_Exact_Code($code, $branch_id);
+    }
+
     public function getWarehouseStockForProduct($product_id, $branch_id)
     {
         return $this->Get_Warehouse_Wise_Product_Stock($product_id, $branch_id);

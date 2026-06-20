@@ -5,3 +5,9 @@
 {"timestamp":"2026-06-03 18:11:12","level":"error","message":"FCM token save error","context":{"error":"Cannot access protected property NotificationModel::$db"}}
 {"timestamp":"2026-06-03 19:29:23","level":"error","message":"View not found","context":{"view":"SalesAudit\/checklist"}}
 {"timestamp":"2026-06-03 19:31:07","level":"error","message":"View not found","context":{"view":"SalesAudit\/checklist"}}
+{"timestamp":"2026-06-19 15:03:44","level":"info","message":"Telegram message sent","context":{"chat_id":"1801670134","message_id":3}}
+{"timestamp":"2026-06-19 15:14:37","level":"info","message":"Telegram alert: no eligible recipients","context":{"payment_id":552,"payment_code":"PAY-20260619-0002","invoice_id":524,"alert_type":"sales_payment_received"}}
+{"timestamp":"2026-06-19 15:15:08","level":"info","message":"Telegram message sent","context":{"chat_id":"1801670134","message_id":4}}
+{"timestamp":"2026-06-19 15:16:12","level":"info","message":"Telegram message sent","context":{"chat_id":"1801670134","message_id":5}}
+{"timestamp":"2026-06-19 15:17:44","level":"info","message":"Telegram alert: no eligible recipients","context":{"payment_id":553,"payment_code":"PAY-20260619-0003","invoice_id":526,"alert_type":"sales_payment_received"}}
+{"timestamp":"2026-06-19 15:17:48","level":"info","message":"Telegram alert: no eligible recipients","context":{"payment_id":554,"payment_code":"PAY-20260619-0004","invoice_id":525,"alert_type":"sales_payment_received"}}

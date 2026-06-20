@@ -22,7 +22,6 @@
         adjustment: 'Adjustment',
     };
 
-    const OUTFLOW = ['advance', 'loan', 'salary', 'adjustment'];
 
     let empTable = null;
 
@@ -85,6 +84,14 @@
                 '<p class="text-muted text-center py-4 mb-0">No transactions found.</p>';
         }
 
+        if (document.getElementById('empTxnFilterForm') && window.showReversed) {
+            const statusField = document.querySelector('#empTxnFilterForm [name="status"]');
+            if (statusField) {
+                statusField.value = 'reversed';
+                statusField.disabled = true;
+            }
+        }
+
         if (document.getElementById('employeeTransactionForm')) {
             initCreateForm(base);
         }
@@ -140,7 +147,7 @@
             const amount = $tr.find('.emp-txn-amount').text().trim();
             const date = $tr.find('td:first small').text().trim();
             const mode = $tr.find('td').eq(5).text().trim();
-            const canReverse = $tr.find('.js-emp-reverse').length > 0;
+            const canReverse = !window.showReversed && $tr.find('.js-emp-reverse').length > 0;
 
             html += `<article class="emp-txn-mobile-card${$tr.hasClass('table-secondary') ? ' reversed' : ''}">
                 <div class="d-flex justify-content-between gap-2">
@@ -173,11 +180,12 @@
             const revBtn = tr.querySelector('.js-emp-reverse');
             const id = revBtn?.dataset.paymentId || tr.querySelector('a[href*="details/"]')?.href?.split('/').pop() || '';
             const code = tr.querySelector('.branch-code-pill')?.textContent?.trim() || '';
+            const canReverse = !window.showReversed && !!revBtn;
             html += `<article class="emp-txn-mobile-card">
                 <div class="branch-code-pill">${escapeHtml(code)}</div>
                 <div class="mt-2 d-flex gap-2">
                     <a href="${base}EmployeeTransaction/details/${id}" class="btn btn-sm btn-outline-primary">Details</a>
-                    ${revBtn ? `<button type="button" class="btn btn-sm btn-outline-danger js-emp-reverse" data-payment-id="${id}" data-payment-code="${escapeHtml(code)}">Reverse</button>` : ''}
+                    ${canReverse ? `<button type="button" class="btn btn-sm btn-outline-danger js-emp-reverse" data-payment-id="${id}" data-payment-code="${escapeHtml(code)}">Reverse</button>` : ''}
                 </div>
             </article>`;
         });
@@ -194,6 +202,23 @@
         const typeSelect = document.getElementById('transaction_type');
         const amountInput = document.getElementById('amount');
         const typeHint = document.getElementById('typeHint');
+        const glPreview = document.getElementById('accounting_preview');
+        const glLabels = window.ET_BOOT?.glLabels || {};
+        const glPreviewApi = window.AccountingJournalPreview;
+
+        function renderGlPreview(type, amt, mode, bankName) {
+            if (!glPreviewApi) {
+                return;
+            }
+            glPreviewApi.renderEmployeePreview(glPreview, {
+                type,
+                amount: amt,
+                mode,
+                bankName,
+                glLabels,
+                partySelected: !!employeeSelect?.value,
+            });
+        }
 
         function syncBank() {
             if (!modeSelect || !bankSection) return;
@@ -205,7 +230,10 @@
             }
         }
 
-        modeSelect?.addEventListener('change', syncBank);
+        modeSelect?.addEventListener('change', () => {
+            syncBank();
+            updatePreview();
+        });
 
         typeSelect?.addEventListener('change', () => {
             if (typeHint) typeHint.textContent = TYPE_HINTS[typeSelect.value] || '';
@@ -216,6 +244,9 @@
             const opt = employeeSelect?.selectedOptions?.[0];
             const name = opt?.textContent?.trim() || 'Employee';
             const type = typeSelect?.value || '';
+            const amt = parseFloat(amountInput?.value || 0);
+            const mode = modeSelect?.value || 'cash';
+            const bankName = bankSelect?.selectedOptions?.[0]?.text || glLabels.bank || 'Bank';
             document.getElementById('previewAvatar')?.replaceChildren(document.createTextNode(name.charAt(0) || '?'));
             const pn = document.getElementById('previewEmployee');
             if (pn) pn.textContent = name.split('(')[0].trim();
@@ -226,12 +257,15 @@
                 pa.textContent = formatMoney(amountInput?.value || 0);
                 pa.className = 'mt-2 emp-txn-amount ' + (type || 'advance');
             }
+            renderGlPreview(type, amt, mode, bankName);
         }
 
         [employeeSelect, typeSelect, amountInput].forEach((el) => {
             el?.addEventListener('input', updatePreview);
             el?.addEventListener('change', updatePreview);
         });
+
+        bankSelect?.addEventListener('change', updatePreview);
 
         employeeSelect?.addEventListener('change', async function () {
             const eid = this.value;
@@ -311,12 +345,17 @@
         const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
         const { value: reason, isConfirmed } = await Swal.fire({
             title: 'Reverse transaction?',
-            html: 'Voucher <strong>' + escapeHtml(paymentCode || id) + '</strong> will be reversed.',
+            html:
+                'Voucher <strong>' + escapeHtml(paymentCode || id) + '</strong> will be reversed.<br>' +
+                '<span class="text-danger small">GL, employee ledger, and bank book (if any) are undone. This cannot be undone.</span>',
             input: 'textarea',
-            inputLabel: 'Reason (min 3 characters)',
+            inputLabel: 'Reason (required, min 3 characters)',
+            inputPlaceholder: 'Why is this transaction being reversed?',
+            inputAttributes: { 'aria-label': 'Reversal reason', maxlength: 500 },
             showCancelButton: true,
             confirmButtonText: 'Yes, reverse',
             confirmButtonColor: '#dc2626',
+            focusConfirm: false,
             preConfirm: (v) => {
                 const r = String(v || '').trim();
                 if (r.length < 3) {

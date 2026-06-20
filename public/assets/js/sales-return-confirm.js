@@ -20,29 +20,69 @@
             return form.querySelectorAll('.sr-warehouse-select');
         }
 
+        function warehouseHiddens() {
+            return form.querySelectorAll('.sr-warehouse-hidden');
+        }
+
         function conditionSelects() {
             return form.querySelectorAll('.sr-condition-select');
+        }
+
+        function syncConditionHidden(row) {
+            const sel = row.querySelector('.sr-condition-select');
+            const hidden = row.querySelector('.sr-condition-hidden');
+            if (sel && hidden) {
+                hidden.value = sel.value;
+            }
+        }
+
+        function syncWarehouseHidden(row) {
+            const hidden = row.querySelector('.sr-warehouse-hidden');
+            const select = row.querySelector('.sr-warehouse-select');
+            if (!hidden || !select) return;
+            hidden.value = select.value || hidden.value || '';
+        }
+
+        function defaultWarehouseForSelect(select) {
+            if (select.value) return select.value;
+            const bulk = bulkSelect?.value;
+            if (bulk) return bulk;
+            for (let i = 0; i < select.options.length; i += 1) {
+                if (select.options[i].value) {
+                    return select.options[i].value;
+                }
+            }
+            return '';
         }
 
         function syncRowState(row) {
             const cond = row.querySelector('.sr-condition-select');
             const isDamage = cond && cond.value === 'Damage';
             row.classList.toggle('is-damage', isDamage);
+            syncConditionHidden(row);
+
             const hint = row.querySelector('.sr-confirm-line-hint');
             if (hint) {
                 hint.textContent = isDamage
-                    ? 'Damaged — stock will not increase'
+                    ? 'Damaged — auto write-off after receive (no sellable stock)'
                     : 'Good — quantity will be added to selected warehouse';
                 hint.classList.toggle('is-damage-note', isDamage);
             }
+
             const whSelect = row.querySelector('.sr-warehouse-select');
             if (whSelect) {
-                whSelect.disabled = isDamage;
                 if (isDamage) {
+                    const def = defaultWarehouseForSelect(whSelect);
+                    if (def) whSelect.value = def;
+                    whSelect.disabled = true;
+                    whSelect.classList.add('sr-warehouse-select--muted');
                     whSelect.removeAttribute('required');
                 } else {
+                    whSelect.disabled = false;
+                    whSelect.classList.remove('sr-warehouse-select--muted');
                     whSelect.setAttribute('required', 'required');
                 }
+                syncWarehouseHidden(row);
             }
             updateRowStockBadge(row);
         }
@@ -97,6 +137,7 @@
                 select.value = current;
             }
             select.dataset.stockLoaded = '1';
+            syncWarehouseHidden(row);
             updateRowStockBadge(row);
         }
 
@@ -128,21 +169,35 @@
             badge.title = `Physical on hand: ${phys.toFixed(2)} · Available: ${avail.toFixed(2)}`;
         }
 
-        function updateProgress() {
-            const selects = warehouseSelects();
-            if (!selects.length) return;
+        function countWarehouseReady() {
             let filled = 0;
-            selects.forEach((s) => {
-                if (!s.disabled && s.value) filled += 1;
+            let required = 0;
+            form.querySelectorAll('tbody tr[data-product-id]').forEach((row) => {
+                required += 1;
+                const hidden = row.querySelector('.sr-warehouse-hidden');
+                if (hidden && parseInt(hidden.value, 10) > 0) {
+                    filled += 1;
+                }
             });
-            const required = Array.from(selects).filter((s) => !s.disabled).length;
+            return { filled, required };
+        }
+
+        function updateProgress() {
+            const { filled, required } = countWarehouseReady();
             const pct = required ? Math.round((filled / required) * 100) : 100;
             if (progressBar) progressBar.style.width = pct + '%';
 
+            const allConditionsSet = conditionSelects().length > 0;
             checklistItems.forEach((el) => {
                 const key = el.getAttribute('data-check');
                 if (key === 'warehouse') {
-                    el.classList.toggle('done', filled === required);
+                    el.classList.toggle('done', filled === required && required > 0);
+                }
+                if (key === 'condition') {
+                    el.classList.toggle('done', allConditionsSet);
+                }
+                if (key === 'inspect') {
+                    el.classList.toggle('done', filled === required && required > 0 && allConditionsSet);
                 }
             });
         }
@@ -155,11 +210,10 @@
 
         form.querySelectorAll('tbody tr[data-product-id]').forEach((row) => {
             enrichWarehouseOptions(row);
+            syncRowState(row);
         });
 
         conditionSelects().forEach((sel) => {
-            const row = sel.closest('tr');
-            if (row) syncRowState(row);
             sel.addEventListener('change', () => {
                 const r = sel.closest('tr');
                 if (r) syncRowState(r);
@@ -169,8 +223,9 @@
 
         warehouseSelects().forEach((sel) => {
             sel.addEventListener('change', () => {
-                markInvalid(sel, !sel.disabled && !sel.value);
                 const row = sel.closest('tr');
+                if (row) syncWarehouseHidden(row);
+                markInvalid(sel, !sel.disabled && !sel.value);
                 if (row) updateRowStockBadge(row);
                 updateProgress();
             });
@@ -184,12 +239,14 @@
                     Swal.fire('Select warehouse', 'Choose a warehouse to apply to all lines.', 'info');
                     return;
                 }
-                warehouseSelects().forEach((s) => {
-                    if (s.disabled) return;
+                form.querySelectorAll('tbody tr[data-product-id]').forEach((row) => {
+                    const s = row.querySelector('.sr-warehouse-select');
+                    if (!s) return;
                     s.value = wid;
+                    syncWarehouseHidden(row);
                     markInvalid(s, false);
-                    const row = s.closest('tr');
-                    if (row) updateRowStockBadge(row);
+                    updateRowStockBadge(row);
+                    syncRowState(row);
                 });
                 updateProgress();
             });
@@ -199,19 +256,34 @@
 
         form.addEventListener('submit', function (e) {
             e.preventDefault();
+
+            form.querySelectorAll('tbody tr[data-product-id]').forEach((row) => {
+                syncConditionHidden(row);
+                syncRowState(row);
+            });
+
             let valid = true;
-            warehouseSelects().forEach((s) => {
-                if (s.disabled) return;
-                if (!s.value) {
-                    markInvalid(s, true);
+            form.querySelectorAll('tbody tr[data-product-id]').forEach((row) => {
+                const cond = row.querySelector('.sr-condition-select');
+                const isGood = cond && cond.value === 'Good';
+                const hidden = row.querySelector('.sr-warehouse-hidden');
+                const select = row.querySelector('.sr-warehouse-select');
+                const whVal = parseInt(hidden?.value || '0', 10);
+
+                if (whVal <= 0) {
                     valid = false;
+                    if (select && isGood) markInvalid(select, true);
+                    row.classList.add('is-invalid-row');
+                } else if (select && isGood) {
+                    markInvalid(select, false);
                 }
             });
+
             if (!valid) {
                 Swal.fire({
                     icon: 'warning',
                     title: 'Warehouse required',
-                    text: 'Select a warehouse for every Good line (or use Apply to all).',
+                    text: 'Select a warehouse for every Good line (or use Apply to all). Damage lines are auto-assigned.',
                 });
                 const first = form.querySelector('.sr-warehouse-select.is-invalid');
                 if (first) first.focus();

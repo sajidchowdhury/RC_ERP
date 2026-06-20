@@ -4,10 +4,12 @@
  * @var array $customer
  * @var array $salesPersons
  * @var bool $isEdit
+ * @var bool $canDeactivate
  */
 $customer = $customer ?? [];
 $salesPersons = $salesPersons ?? [];
 $isEdit = !empty($isEdit);
+$canDeactivate = $canDeactivate ?? true;
 $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 $selectedSales = (int)($customer['sales_person_id'] ?? 0);
 ?>
@@ -91,8 +93,11 @@ $selectedSales = (int)($customer['sales_person_id'] ?? 0);
         </div>
         <div class="status-option">
             <input type="radio" name="is_active" id="custInactive" value="0"
-                   <?= empty($customer['is_active']) ? 'checked' : '' ?>>
-            <label for="custInactive" class="inactive-opt"><i class="fas fa-circle-xmark"></i> Inactive</label>
+                   <?= empty($customer['is_active']) ? 'checked' : '' ?>
+                   <?= ($canDeactivate || empty($customer['is_active'])) ? '' : 'disabled' ?>>
+            <label for="custInactive" class="inactive-opt<?= (!$canDeactivate && !empty($customer['is_active'])) ? ' opacity-50' : '' ?>">
+                <i class="fas fa-circle-xmark"></i> Inactive
+            </label>
         </div>
     </div>
 </div>

@@ -159,6 +159,90 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* Customer search picker (payment create) */
+.cust-txn-customer-picker {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+.cust-txn-search-input:focus {
+    border-color: #0d9488;
+    box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+}
+
+.cust-txn-search-input.is-locked {
+    background: #f8fafc;
+    cursor: default;
+}
+
+.cust-txn-suggest-list {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 1060;
+    max-height: 280px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+    margin-top: 4px;
+}
+
+.cust-txn-suggest-list.show {
+    display: block;
+}
+
+.cust-txn-suggest-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: #fff;
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.cust-txn-suggest-item:hover {
+    background: #f0fdfa;
+}
+
+.cust-txn-suggest-item .suggest-title {
+    font-weight: 600;
+    font-size: 0.92rem;
+    display: block;
+}
+
+.cust-txn-suggest-item .suggest-meta {
+    font-size: 0.78rem;
+    color: #64748b;
+    display: block;
+}
+
+.cust-txn-suggest-empty {
+    padding: 0.75rem 0.9rem;
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.cust-txn-recents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.cust-txn-recents.is-hidden {
+    display: none;
+}
+
+.cust-txn-recents .btn {
+    font-size: 0.78rem;
+    padding: 0.2rem 0.55rem;
+}
+
 .branch-hub-panel .purch-audit-item {
     border-radius: 10px;
 }

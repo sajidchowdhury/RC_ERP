@@ -5,6 +5,7 @@ require_once '../core/BaseController.php';
 require_once '../app/models/CustomerModel.php';
 require_once '../app/models/EmployeeModel.php';
 require_once '../core/UserAudit.php';
+require_once __DIR__ . '/../helpers/MasterDataAuditHelper.php';
 
 class CustomerController extends BaseController {
 
@@ -20,7 +21,6 @@ class CustomerController extends BaseController {
     }
 
     public function index() {
-        // Handle DataTables server-side request
         if (isset($_GET['draw'])) {
             $params = $_GET;
             $params['includeDeleted'] = isset($_GET['deleted']) && $_GET['deleted'] == '1';
@@ -31,10 +31,9 @@ class CustomerController extends BaseController {
             exit;
         }
 
-        // Normal page load
         $showDeleted = isset($_GET['deleted']) && $_GET['deleted'] == '1';
 
-        $salesPersons = $this->employeeModel->getAllEmployees(); // For filter dropdown
+        $salesPersons = $this->employeeModel->getAllEmployees();
 
         $data = [
             'title'        => $showDeleted ? 'Inactive customers' : 'Customer directory',
@@ -45,8 +44,30 @@ class CustomerController extends BaseController {
         $this->view('customer/index', $data);
     }
 
+    public function show($id = null) {
+        if (!$id) {
+            $this->redirect('customer/index');
+        }
+
+        $customerId = (int)$id;
+        $customer = $this->customerModel->getCustomerById($customerId);
+        if (!$customer) {
+            $_SESSION['error'] = 'Customer not found!';
+            $this->redirect('customer/index');
+        }
+
+        $this->view('customer/show', [
+            'title'    => ($customer['shop_name'] ?? 'Customer') . ' — Hub',
+            'customer' => $customer,
+            'summary'  => $this->customerModel->getCustomerHubSummary($customerId),
+            'ledger'   => $this->customerModel->getRecentLedgerEntries($customerId),
+            'invoices' => $this->customerModel->getRecentInvoices($customerId),
+            'payments' => $this->customerModel->getRecentPayments($customerId),
+        ]);
+    }
+
     public function create() {
-        $salesPersons = $this->employeeModel->getAllEmployees(); // Or filter by role if needed
+        $salesPersons = $this->employeeModel->getAllEmployees();
         $data = [
             'title' => 'Create New Customer',
             'salesPersons' => $salesPersons
@@ -61,9 +82,11 @@ class CustomerController extends BaseController {
             $result = $this->customerModel->createCustomer($_POST);
 
             if ($result['status'] === 'success') {
-                $this->userAudit->log($_SESSION['user_id'] ?? 0, 'customer_created', null, [
+                $this->userAudit->log($_SESSION['user_id'] ?? 0, 'customer_created', (int)($result['id'] ?? 0), [
+                    'customer_code' => $result['customer_code'] ?? '',
+                    'shop_name'     => $_POST['shop_name'] ?? '',
                     'customer_name' => $_POST['customer_name'] ?? '',
-                    'shop_name' => $_POST['shop_name'] ?? ''
+                    'mobile'        => $_POST['mobile'] ?? '',
                 ]);
 
                 $_SESSION['success'] = $result['message'];
@@ -99,14 +122,27 @@ class CustomerController extends BaseController {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && $id) {
             $this->validateCSRF();
 
-            $result = $this->customerModel->updateCustomer($id, $_POST);
+            $customerId = (int)$id;
+            $before = $this->customerModel->getCustomerById($customerId);
+            if (!$before) {
+                $_SESSION['error'] = 'Customer not found!';
+                $this->redirect('customer/index');
+            }
+
+            $result = $this->customerModel->updateCustomer($customerId, $_POST);
 
             if ($result['status'] === 'success') {
-                $this->userAudit->log($_SESSION['user_id'] ?? 0, 'customer_updated', (int)$id, [
-                    'customer_name' => $_POST['customer_name'] ?? '',
-                    'shop_name' => $_POST['shop_name'] ?? '',
-                    'mobile' => $_POST['mobile'] ?? ''
-                ]);
+                $after = array_merge($before, $this->customerModel->getCustomerById($customerId) ?: []);
+                $displayOverrides = $this->buildCustomerAuditDisplayOverrides($before, $after);
+
+                $details = MasterDataAuditHelper::buildUpdateDetails(
+                    $before,
+                    $after,
+                    MasterDataAuditHelper::CUSTOMER_FIELDS,
+                    $displayOverrides
+                );
+
+                $this->userAudit->log($_SESSION['user_id'] ?? 0, 'customer_updated', $customerId, $details);
 
                 $_SESSION['success'] = $result['message'];
             } else {
@@ -128,19 +164,13 @@ class CustomerController extends BaseController {
 
             $isCurrentlyActive = (int)$customer['is_active'] === 1;
 
-            // Safety check only when trying to deactivate
             if ($isCurrentlyActive) {
                 $safety = $this->customerModel->getDeactivationSafetyStatus((int)$id);
                 if (!$safety['can_deactivate']) {
-                    $msg = "Cannot deactivate this customer.";
-                    if ($safety['has_outstanding']) {
-                        $msg .= " Outstanding balance: " . number_format($safety['outstanding_balance'], 2);
-                    }
-                    if ($safety['has_sales_history']) {
-                        $msg .= ($safety['has_outstanding'] ? ". " : " ") . "Has " . number_format($safety['sales_count']) . " sales record(s).";
-                    }
-                    $msg .= " Clear dues before changing status.";
-                    echo json_encode(['status' => 'error', 'message' => $msg]);
+                    echo json_encode([
+                        'status'  => 'error',
+                        'message' => $this->customerModel->getDeactivationMessage((int)$id),
+                    ]);
                     exit;
                 }
             }
@@ -157,10 +187,6 @@ class CustomerController extends BaseController {
         $this->redirect('customer/index');
     }
 
-    /**
-     * Soft delete (deactivate) a customer
-     * Includes safety checks for outstanding balance and sales history.
-     */
     public function delete($id = null) {
         if (!$id) {
             echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
@@ -172,16 +198,12 @@ class CustomerController extends BaseController {
         $safety = $this->customerModel->getDeactivationSafetyStatus((int)$id);
 
         if (!$safety['can_deactivate']) {
-            $msg = "Cannot deactivate this customer.";
-            if ($safety['has_outstanding']) {
-                $msg .= " Outstanding balance: " . number_format($safety['outstanding_balance'], 2);
-            }
-            if ($safety['has_sales_history']) {
-                $msg .= ($safety['has_outstanding'] ? ". " : " ") . "Has " . number_format($safety['sales_count']) . " sales record(s).";
-            }
-            $msg .= " Please clear all dues or review related records before archiving.";
-
-            echo json_encode(['status' => 'error', 'message' => $msg, 'safety' => $safety]);
+            echo json_encode([
+                'status'  => 'error',
+                'message' => $this->customerModel->getDeactivationMessage((int)$id)
+                    . ' Please clear all dues or review related records before archiving.',
+                'safety'  => $safety,
+            ]);
             exit;
         }
 
@@ -195,9 +217,6 @@ class CustomerController extends BaseController {
         exit;
     }
 
-    /**
-     * Restore a soft-deleted customer
-     */
     public function restore($id = null) {
         if (!$id) {
             echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
@@ -216,11 +235,9 @@ class CustomerController extends BaseController {
         exit;
     }
 
-    /**
-     * Audit Log viewer for Customer-related actions
-     */
     public function audit() {
-        $logs = $this->userAudit->getRecentLogs(300, 'customer_'); // Only customer-related actions
+        $logs = $this->userAudit->getRecentLogs(300, 'customer_');
+        $logs = MasterDataAuditHelper::enrichLogsWithUserNames($logs);
 
         $data = [
             'title' => 'Customer Audit Logs',
@@ -228,5 +245,42 @@ class CustomerController extends BaseController {
         ];
 
         $this->view('customer/audit', $data);
+    }
+
+    /**
+     * @param array<string, mixed> $before
+     * @param array<string, mixed> $after
+     * @return array<string, array{from: string, to: string}>
+     */
+    private function buildCustomerAuditDisplayOverrides(array $before, array $after): array
+    {
+        $overrides = [];
+
+        if ((int)($before['sales_person_id'] ?? 0) !== (int)($after['sales_person_id'] ?? 0)) {
+            $overrides['sales_person_id'] = [
+                'from' => $this->resolveEmployeeName((int)($before['sales_person_id'] ?? 0)),
+                'to'   => $this->resolveEmployeeName((int)($after['sales_person_id'] ?? 0)),
+            ];
+        }
+
+        if ((float)($before['credit_limit'] ?? 0) !== (float)($after['credit_limit'] ?? 0)) {
+            $overrides['credit_limit'] = [
+                'from' => number_format((float)($before['credit_limit'] ?? 0), 2),
+                'to'   => number_format((float)($after['credit_limit'] ?? 0), 2),
+            ];
+        }
+
+        return $overrides;
+    }
+
+    private function resolveEmployeeName(int $employeeId): string
+    {
+        if ($employeeId <= 0) {
+            return '—';
+        }
+
+        $employee = $this->employeeModel->getEmployeeById($employeeId);
+
+        return trim((string)($employee['name'] ?? $employee['employee_name'] ?? '')) ?: ('#' . $employeeId);
     }
 }

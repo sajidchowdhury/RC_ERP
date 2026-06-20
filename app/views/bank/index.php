@@ -48,12 +48,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
             </div>
         </div>
     </div>
-    <nav class="branch-hub-quick">
-        <a href="<?= BASE_URL ?>MoneyTransfer"><i class="fas fa-right-left"></i> Money transfer</a>
-        <a href="<?= BASE_URL ?>OtherIncome"><i class="fas fa-arrow-down"></i> Other income</a>
-        <a href="<?= BASE_URL ?>OtherExpense"><i class="fas fa-arrow-up"></i> Other expense</a>
-        <a href="<?= BASE_URL ?>CustomerTransaction"><i class="fas fa-money-bill-wave"></i> Customer payments</a>
-    </nav>
+    <?php include __DIR__ . '/../partials/accounting_quick_nav.php'; ?>
     <?php endif; ?>
 
     <div class="branch-hub-panel">
@@ -124,7 +119,7 @@ function bankNameCell(row) {
     const acct = row.account_number
         ? '<div class="branch-contact"><i class="fas fa-hashtag"></i> '+bankEsc(row.account_number)+'</div>'
         : '';
-    return '<div class="branch-name-cell"><div class="branch-avatar">'+bankInitial(row.bank_name)+'</div><div><div class="name">'+bankEsc(row.bank_name)+'</div>'+acct+branch+'</div></div>';
+    return '<div class="branch-name-cell"><div class="branch-avatar">'+bankInitial(row.bank_name)+'</div><div><div class="name"><a href="'+BANK_BASE+'/show/'+row.id+'" class="text-decoration-none text-reset">'+bankEsc(row.bank_name)+'</a></div>'+acct+branch+'</div></div>';
 }
 function bankBalanceCell(row) {
     const bal = parseFloat(row.balance) || 0;
@@ -134,6 +129,7 @@ function bankBalanceCell(row) {
 function bankActions(row) {
     const id = row.id, name = (row.bank_name||'').replace(/'/g,"\\'");
     let h = '<div class="branch-action-bar">';
+    h += '<a href="'+BANK_BASE+'/show/'+id+'" class="btn-action view" title="Hub"><i class="fas fa-circle-info"></i></a>';
     h += '<a href="'+BANK_BASE+'/edit/'+id+'" class="btn-action edit"><i class="fas fa-pen"></i></a>';
     if (BANK_SHOW_DELETED) {
         h += '<button type="button" class="btn-action restore" onclick="restoreBank('+id+')"><i class="fas fa-rotate-left"></i></button>';
@@ -174,7 +170,7 @@ $(function() {
 function deleteBank(id, name) {
     Swal.fire({
         title: 'Deactivate this bank?',
-        html: 'Deactivate <strong>"'+name+'"</strong>. Hidden from payment lists; can be restored.',
+        html: 'Deactivate <strong>"'+name+'"</strong>. Hidden from payment lists; can be restored.<br><br><small class="text-muted">Blocked if balance is non-zero or linked transactions exist.</small>',
         icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', confirmButtonText: 'Deactivate'
     }).then(r => {
         if (!r.isConfirmed) return;
@@ -211,7 +207,7 @@ function renderBankCards(table) {
     let html = '';
     table.rows({ page: 'current' }).data().each(row => {
         const name = (row.bank_name||'').replace(/'/g,"\\'");
-        html += '<article class="bank-mobile-card"><div class="fw-semibold">'+bankEsc(row.bank_name)+'</div><div class="small text-muted">'+bankEsc(row.account_number)+'</div>'+bankBalanceCell(row)+'<div class="mt-2">'+bankStatusPill(row.is_active)+'</div><div class="card-actions">'+bankActions(row)+'</div></article>';
+        html += '<article class="bank-mobile-card"><div class="fw-semibold"><a href="'+BANK_BASE+'/show/'+row.id+'" class="text-decoration-none text-reset">'+bankEsc(row.bank_name)+'</a></div><div class="small text-muted">'+bankEsc(row.account_number)+'</div>'+bankBalanceCell(row)+'<div class="mt-2">'+bankStatusPill(row.is_active)+'</div><div class="card-actions">'+bankActions(row)+'</div></article>';
     });
     c.innerHTML = html || '<div class="text-center text-muted py-4">No banks found.</div>';
 }

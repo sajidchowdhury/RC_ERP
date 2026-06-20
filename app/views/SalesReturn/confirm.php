@@ -29,8 +29,24 @@ ob_start();
 <div id="sr-confirm-app" class="sr-confirm-app container-fluid py-2">
     <header class="sr-confirm-hero">
         <div>
-            <h1><i class="fas fa-warehouse me-2"></i>Warehouse confirm</h1>
-            <p>Verify condition &amp; receiving warehouse — branch stock shown per line</p>
+            <h1><i class="fas fa-warehouse me-2"></i>Step 2 — Warehouse confirm</h1>
+            <p>Inspect goods, verify condition, and choose receiving warehouse — stock &amp; credit note post here</p>
+            <div class="sr-journey-steps sr-journey-steps--hero" aria-label="Return process">
+                <div class="sr-journey-step is-done">
+                    <span class="sr-journey-num"><i class="fas fa-check"></i></span>
+                    <span class="sr-journey-label">Received from customer</span>
+                </div>
+                <span class="sr-journey-arrow" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
+                <div class="sr-journey-step is-active">
+                    <span class="sr-journey-num">2</span>
+                    <span class="sr-journey-label">Warehouse confirm</span>
+                </div>
+                <span class="sr-journey-arrow" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
+                <div class="sr-journey-step is-muted">
+                    <span class="sr-journey-num">3</span>
+                    <span class="sr-journey-label">Auto damage (if damaged)</span>
+                </div>
+            </div>
             <span class="sales-return-branch-tag">
                 <i class="fas fa-map-marker-alt me-1"></i><?= htmlspecialchars($branchName, ENT_QUOTES) ?>
             </span>
@@ -134,6 +150,7 @@ ob_start();
                             $cond = trim($item['condition'] ?? 'Good');
                             $isGood = strtolower($cond) !== 'damage';
                             $defaultWh = $singleWarehouseId ?: (int)($item['warehouse_id'] ?? 0);
+                            $salesCond = $cond;
                         ?>
                             <tr class="<?= $isGood ? '' : 'is-damage' ?>"
                                 data-line-id="<?= $itemId ?>"
@@ -147,16 +164,20 @@ ob_start();
                                 </td>
                                 <td class="text-center fw-bold"><?= $formatQty($item['return_qty'] ?? 0) ?></td>
                                 <td>
-                                    <select name="items[<?= $itemId ?>][condition]"
-                                            class="form-select form-select-sm sr-condition-select">
+                                    <select class="form-select form-select-sm sr-condition-select">
                                         <option value="Good" <?= $isGood ? 'selected' : '' ?>>Good (restock)</option>
                                         <option value="Damage" <?= !$isGood ? 'selected' : '' ?>>Damage (no stock)</option>
                                     </select>
+                                    <input type="hidden" name="items[<?= $itemId ?>][condition]" class="sr-condition-hidden" value="<?= htmlspecialchars($cond, ENT_QUOTES) ?>">
+                                    <small class="sr-sales-condition-note text-muted">Sales noted: <?= htmlspecialchars($salesCond, ENT_QUOTES) ?></small>
                                 </td>
                                 <td>
-                                    <select name="items[<?= $itemId ?>][warehouse_id]"
-                                            class="form-select form-select-sm sr-warehouse-select"
-                                            required>
+                                    <input type="hidden"
+                                           name="items[<?= $itemId ?>][warehouse_id]"
+                                           class="sr-warehouse-hidden"
+                                           value="<?= $defaultWh > 0 ? $defaultWh : '' ?>">
+                                    <select class="form-select form-select-sm sr-warehouse-select"
+                                            <?= $isGood ? 'required' : '' ?>>
                                         <option value="">— Warehouse —</option>
                                         <?php foreach ($warehouses as $w):
                                             $wid = (int)$w['id'];
@@ -167,7 +188,7 @@ ob_start();
                                         <?php endforeach; ?>
                                     </select>
                                     <span class="sr-confirm-line-hint <?= $isGood ? '' : 'is-damage-note' ?>">
-                                        <?= $isGood ? 'Good — quantity will be added to selected warehouse' : 'Damaged — stock will not increase' ?>
+                                        <?= $isGood ? 'Good — quantity will be added to selected warehouse' : 'Damaged — received then auto write-off (linked damage doc)' ?>
                                     </span>
                                     <input type="hidden" name="items[<?= $itemId ?>][product_id]" value="<?= (int)($item['product_id'] ?? 0) ?>">
                                     <input type="hidden" name="items[<?= $itemId ?>][return_qty]" value="<?= htmlspecialchars((string)($item['return_qty'] ?? 0), ENT_QUOTES) ?>">
@@ -196,8 +217,8 @@ ob_start();
                     <h3><i class="fas fa-bolt me-1"></i>On confirm</h3>
                     <ul>
                         <li>Customer ledger <strong>credit note</strong> for <?= $formatMoney($returnTotal) ?></li>
-                        <li><strong>Good</strong> lines increase warehouse stock</li>
-                        <li><strong>Damage</strong> lines do not add stock</li>
+                        <li><strong>Good</strong> lines increase warehouse stock (Dr Inventory / Cr COGS)</li>
+                        <li><strong>Damage</strong> lines: received → auto <strong>damage write-off</strong> (Dr Shrinkage / Cr Inventory at cost)</li>
                         <li>Return status becomes <strong>Completed</strong></li>
                     </ul>
                 </div>
@@ -213,8 +234,12 @@ ob_start();
                     </div>
                     <div class="sr-confirm-check-item" data-check="warehouse">
                         <i class="fas fa-circle"></i>
-                        <span>Every line has a receiving warehouse</span>
+                        <span>Every line has a receiving warehouse assigned</span>
                     </div>
+                    <p class="sr-confirm-check-note small text-muted mb-0 mt-2">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Damage lines are received then auto-written off — linked damage document created (no sellable stock).
+                    </p>
                 </div>
             </aside>
         </div>

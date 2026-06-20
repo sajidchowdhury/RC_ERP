@@ -657,6 +657,8 @@ class JournalPostingService
         }
 
         $invoiceCode = $context['invoice_code'] ?? ('SI-' . $invoiceId);
+        $challanCode = trim((string)($context['challan_code'] ?? ''));
+        $challanSuffix = $challanCode !== '' ? ' (Challan #' . $challanCode . ')' : '';
         $lines = [];
 
         if ($delta > 0) {
@@ -698,7 +700,7 @@ class JournalPostingService
 
         $header = [
             'entry_date'     => $context['entry_date'] ?? date('Y-m-d'),
-            'description'    => 'Sales Invoice Adjustment - ' . $invoiceCode,
+            'description'    => 'Sales Invoice Adjustment - ' . $invoiceCode . $challanSuffix,
             'reference_type' => 'sales_invoice_adjustment',
             'reference_id'   => $invoiceId,
             'branch_id'      => $context['branch_id'] ?? ($_SESSION['branch_id'] ?? 1),
@@ -883,12 +885,17 @@ class JournalPostingService
      */
     public function postCustomerDiscount(int $paymentId, array $paymentData): array
     {
+        $debitLedgerId = $this->resolveCustomerDiscountLedgerId();
+        if (!$debitLedgerId) {
+            return ['status' => 'error', 'message' => 'Discount ledger not found (configure sales_discount or operating_expense)'];
+        }
+
         return $this->postCustomerArAdjustment(
             $paymentId,
             $paymentData,
             'Customer Discount',
             'Customer discount allowed',
-            false
+            $debitLedgerId
         );
     }
 
@@ -897,24 +904,29 @@ class JournalPostingService
      */
     public function postCustomerWriteOff(int $paymentId, array $paymentData): array
     {
+        $debitLedgerId = $this->resolveCustomerWriteOffLedgerId();
+        if (!$debitLedgerId) {
+            return ['status' => 'error', 'message' => 'Write-off ledger not found (configure financial_expense or operating_expense)'];
+        }
+
         return $this->postCustomerArAdjustment(
             $paymentId,
             $paymentData,
             'Customer Write-off',
             'Bad debt write-off',
-            true
+            $debitLedgerId
         );
     }
 
     /**
-     * Dr operating (or financial) expense / Cr AR — no cash movement.
+     * Dr contra-revenue or expense / Cr AR — no cash movement.
      */
     private function postCustomerArAdjustment(
         int $paymentId,
         array $paymentData,
         string $entryLabel,
         string $lineDescription,
-        bool $preferFinancialExpense
+        int $debitLedgerId
     ): array {
         $amount = (float)($paymentData['amount'] ?? 0);
         if ($amount <= 0) {
@@ -926,10 +938,7 @@ class JournalPostingService
             return ['status' => 'error', 'message' => 'Accounts Receivable ledger not found'];
         }
 
-        $expenseLedgerId = $this->resolveCustomerAdjustmentExpenseLedgerId($preferFinancialExpense);
-        if (!$expenseLedgerId) {
-            return ['status' => 'error', 'message' => 'Expense ledger not found (configure operating_expense or financial_expense)'];
-        }
+        $expenseLedgerId = $debitLedgerId;
 
         $code = $paymentData['payment_code'] ?? ('PAY-' . $paymentId);
         $lines = [
@@ -1037,17 +1046,111 @@ class JournalPostingService
         ];
     }
 
-    private function resolveCustomerAdjustmentExpenseLedgerId(bool $preferFinancial): ?int
+    /**
+     * Customer discount — prefer sales_discount (contra-revenue), else operating expense.
+     */
+    private function resolveCustomerDiscountLedgerId(): ?int
     {
-        if ($preferFinancial) {
-            $id = $this->getLedgerByNature('financial_expense');
-            if ($id) {
-                return $id;
+        return $this->getSalesDiscountLedgerId()
+            ?? $this->getLedgerByNature('operating_expense');
+    }
+
+    /**
+     * Bad debt write-off — prefer financial expense, else operating expense.
+     */
+    private function resolveCustomerWriteOffLedgerId(): ?int
+    {
+        $id = $this->getLedgerByNature('financial_expense');
+        if ($id) {
+            return $id;
+        }
+
+        $all = $this->ledgerModel->getAllLedgers();
+        foreach ($all as $ledger) {
+            if (empty($ledger['is_active'])) {
+                continue;
+            }
+            $name = strtolower($ledger['ledger_name'] ?? '');
+            if (str_contains($name, 'bad debt') || str_contains($name, 'write-off') || str_contains($name, 'write off')) {
+                return (int)$ledger['id'];
             }
         }
 
-        return $this->getLedgerByNature('operating_expense')
-            ?? $this->getLedgerByNature('financial_expense');
+        return $this->getLedgerByNature('operating_expense');
+    }
+
+    /**
+     * Human-readable labels for customer payment GL preview (create form).
+     *
+     * @return array{ar: string, cash: string, bank: string, discount: string, write_off: string}
+     */
+    public function getCustomerTransactionGlPreviewLabels(): array
+    {
+        return [
+            'ar'        => $this->ledgerLabelById($this->getCustomerReceivableLedgerId(), 'Accounts Receivable'),
+            'cash'      => $this->ledgerLabelById($this->getCashLedgerId(), 'Cash'),
+            'bank'      => 'Selected bank account',
+            'discount'  => $this->ledgerLabelById($this->resolveCustomerDiscountLedgerId(), 'Sales discount'),
+            'write_off' => $this->ledgerLabelById($this->resolveCustomerWriteOffLedgerId(), 'Bad debt expense'),
+        ];
+    }
+
+    /**
+     * Human-readable labels for supplier payment GL preview (create form).
+     *
+     * @return array{ap: string, cash: string, bank: string}
+     */
+    public function getSupplierTransactionGlPreviewLabels(): array
+    {
+        return [
+            'ap'   => $this->ledgerLabelById($this->getSupplierPayableLedgerId(), 'Supplier Payable'),
+            'cash' => $this->ledgerLabelById($this->getCashLedgerId(), 'Cash'),
+            'bank' => 'Selected bank account',
+        ];
+    }
+
+    /**
+     * Human-readable labels for employee transaction GL preview (create form).
+     *
+     * @return array{employee_payable: string, cash: string, bank: string}
+     */
+    public function getEmployeeTransactionGlPreviewLabels(): array
+    {
+        return [
+            'employee_payable' => $this->ledgerLabelById($this->getEmployeePayableLedgerId(), 'Employee Payable'),
+            'cash'             => $this->ledgerLabelById($this->getCashLedgerId(), 'Cash'),
+            'bank'             => 'Selected bank account',
+        ];
+    }
+
+    /**
+     * Whether exactly one active employee_payable control ledger exists.
+     *
+     * @return array{configured: bool, count: int, ledger_name: ?string, ledger_id: ?int}
+     */
+    public function getEmployeePayableLedgerStatus(): array
+    {
+        $ledgers = $this->ledgerModel->getLedgersByNature('employee_payable');
+        $active = array_values(array_filter($ledgers, static fn($l) => !empty($l['is_active'])));
+        $count = count($active);
+
+        return [
+            'configured'  => $count === 1,
+            'count'       => $count,
+            'ledger_name' => $active[0]['ledger_name'] ?? null,
+            'ledger_id'   => isset($active[0]['id']) ? (int)$active[0]['id'] : null,
+        ];
+    }
+
+    private function ledgerLabelById(?int $ledgerId, string $fallback): string
+    {
+        if (!$ledgerId) {
+            return $fallback;
+        }
+
+        $ledger = $this->ledgerModel->getLedgerById($ledgerId);
+
+        return $ledger['ledger_name'] ?? $fallback;
     }
 
     /**

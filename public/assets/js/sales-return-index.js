@@ -11,7 +11,7 @@
     const STATUS_LABELS = {
         all: 'All returns',
         active: 'Active',
-        pending: 'Awaiting confirm',
+        pending: 'Awaiting warehouse',
         completed: 'Completed',
         reversed: 'Reversed',
     };
@@ -60,8 +60,12 @@
         });
 
         $('.sales-return-status-chip').on('click', function () {
-            $('#filterStatus').val($(this).data('status'));
+            const status = $(this).data('status');
+            $('#filterStatus').val(status);
             syncStatusChips();
+            if (status === 'pending') {
+                applyPendingFilterView(false);
+            }
             persistAndReload();
         });
 
@@ -82,10 +86,27 @@
         $('#filterSmartSort').on('change', persistAndReload);
 
         $('#filterPendingOnly').on('click', () => {
-            $('#filterStatus').val('pending');
-            syncStatusChips();
-            persistAndReload(true);
+            applyPendingFilterView();
         });
+    }
+
+    /** Pending returns may be older than today — widen date range when filtering awaiting confirm. */
+    function applyPendingFilterView(reload = true) {
+        const today = new Date();
+        const fmt = d => d.toISOString().slice(0, 10);
+        const from = new Date(today);
+        from.setFullYear(from.getFullYear() - 1);
+        $('#filterStatus').val('pending');
+        $('#filterDateFrom').val(fmt(from));
+        $('#filterDateTo').val(fmt(today));
+        $('.sales-return-preset-btn').removeClass('active');
+        $('.sales-return-preset-btn[data-preset="custom"]').addClass('active');
+        syncStatusChips();
+        if (reload) persistAndReload(true);
+        const collapse = document.getElementById('salesReturnFiltersCollapse');
+        if (collapse && typeof bootstrap !== 'undefined' && !collapse.classList.contains('show')) {
+            bootstrap.Collapse.getOrCreateInstance(collapse).show();
+        }
     }
 
     function initFiltersCollapse() {
@@ -264,7 +285,13 @@
             columns: [
                 {
                     data: 'return_code',
-                    render: d => `<strong class="text-danger">${escapeHtml(d)}</strong>`,
+                    render: (d, t, row) => {
+                        let html = `<strong class="text-danger">${escapeHtml(d)}</strong>`;
+                        if (parseInt(row.linked_damage_count || 0, 10) > 0) {
+                            html += ` <span class="badge bg-danger-subtle text-danger border" title="Linked damage write-off"><i class="fas fa-heart-crack"></i></span>`;
+                        }
+                        return html;
+                    },
                 },
                 { data: 'invoice_code', defaultContent: '—', render: d => escapeHtml(d || '—') },
                 {
@@ -279,7 +306,7 @@
                 {
                     data: 'total_amount',
                     className: 'text-end',
-                    render: d => parseFloat(d || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                    render: d => 'Tk ' + parseFloat(d || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
                 },
                 { data: 'status', render: (s, t, row) => returnStatusBadge(s, row.is_reversed) },
                 { data: null, orderable: false, className: 'text-center', render: (d, t, row) => returnActions(row) },
@@ -299,8 +326,8 @@
             return '<span class="badge rounded-pill bg-danger">Reversed</span>';
         }
         const map = {
-            pending: '<span class="badge rounded-pill bg-warning text-dark">Pending</span>',
-            completed: '<span class="badge rounded-pill bg-success">Completed</span>',
+            pending: '<span class="badge rounded-pill bg-warning text-dark" title="Step 2 — warehouse confirm pending">Awaiting warehouse</span>',
+            completed: '<span class="badge rounded-pill bg-success">Confirmed</span>',
             reversed: '<span class="badge rounded-pill bg-danger">Reversed</span>',
         };
         return map[status] || `<span class="badge bg-secondary">${escapeHtml(status || '')}</span>`;
@@ -308,13 +335,20 @@
 
     function returnActions(row) {
         const base = window.SALES_RETURN_BASE + 'SalesReturn/';
-        let html = '<div class="btn-group btn-group-sm flex-wrap">';
+        let html = '<div class="btn-group btn-group-sm flex-wrap sr-return-actions">';
         if (row.status === 'pending' && !parseInt(row.is_reversed || 0, 10)) {
-            html += `<a href="${base}confirm/${row.id}" class="btn btn-success" title="Confirm"><i class="fas fa-check"></i></a>`;
+            html += `<a href="${base}confirm/${row.id}" class="btn btn-success" title="Step 2 — Warehouse confirm"><i class="fas fa-warehouse me-1"></i><span class="d-none d-lg-inline">Confirm</span></a>`;
         }
-        html += `<a href="${base}slip/${row.id}" class="btn btn-outline-info" target="_blank" title="Print"><i class="fas fa-print"></i></a>`;
+        html += `<a href="${base}slip/${row.id}" class="btn btn-outline-info" target="_blank" rel="noopener" title="Print slip"><i class="fas fa-print"></i></a>`;
+        if (parseInt(row.linked_damage_count || 0, 10) > 0) {
+            const dmgId = parseInt(row.linked_damage_id || 0, 10);
+            const dmgUrl = dmgId > 0
+                ? (window.SALES_RETURN_BASE + 'Damage/details/' + dmgId)
+                : (window.SALES_RETURN_BASE + 'Damage?sales_return_id=' + row.id);
+            html += `<a href="${dmgUrl}" class="btn btn-outline-danger" title="Linked damage write-off" target="_blank" rel="noopener"><i class="fas fa-heart-crack"></i></a>`;
+        }
         if (row.status !== 'reversed' && !parseInt(row.is_reversed || 0, 10)) {
-            html += `<a href="${base}reverse/${row.id}" class="btn btn-outline-danger" title="Reverse"><i class="fas fa-undo"></i></a>`;
+            html += `<a href="${base}reverse/${row.id}" class="btn btn-outline-danger" title="Reverse return"><i class="fas fa-undo"></i></a>`;
         }
         return html + '</div>';
     }
@@ -341,7 +375,7 @@
                 <div class="small text-muted mt-1">${escapeHtml(row.invoice_code || '—')} · ${escapeHtml(row.shop_name || row.customer_name || '')}</div>
                 <div class="mt-2 d-flex justify-content-between align-items-center">
                     <span class="small text-muted">${escapeHtml(row.return_date || '')}</span>
-                    <strong>৳${parseFloat(row.total_amount || 0).toLocaleString()}</strong>
+                    <strong>Tk ${parseFloat(row.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                 </div>
                 <div class="mt-2">${returnActions(row)}</div>
             </div>`;

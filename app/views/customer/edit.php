@@ -28,6 +28,9 @@ $balance = (float)($usage['outstanding_balance'] ?? 0);
             </span>
         </div>
         <div class="branch-hub-actions">
+            <a href="<?= BASE_URL ?>customer/show/<?= $customerId ?>" class="btn btn-outline-light btn-sm">
+                <i class="fas fa-circle-info me-1"></i> Hub
+            </a>
             <a href="<?= BASE_URL ?>customer" class="btn btn-outline-light btn-sm">
                 <i class="fas fa-arrow-left me-1"></i> Back
             </a>
@@ -37,7 +40,11 @@ $balance = (float)($usage['outstanding_balance'] ?? 0);
     <div class="branch-form-layout has-aside">
         <div class="branch-form-panel">
             <form method="POST" action="<?= BASE_URL ?>customer/update/<?= $customerId ?>" id="customerForm">
-                <?php $isEdit = true; require __DIR__ . '/_form_fields.php'; ?>
+                <?php
+                $isEdit = true;
+                $canDeactivate = !empty($usage['can_deactivate']);
+                require __DIR__ . '/_form_fields.php';
+                ?>
                 <div class="branch-form-footer">
                     <button type="submit" class="btn btn-primary px-4">
                         <i class="fas fa-save me-1"></i> Save changes

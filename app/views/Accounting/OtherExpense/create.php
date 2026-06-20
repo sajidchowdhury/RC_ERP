@@ -24,19 +24,29 @@ $banks = $banks ?? [];
 
     <div class="branch-form-layout has-aside">
         <div class="branch-form-panel">
-            <form id="otherExpenseForm" novalidate>
+            <form id="otherExpenseForm" novalidate aria-label="Record other expense">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>">
 
                 <div class="branch-form-section">
                     <div class="branch-form-section-head"><span class="icon-wrap red"><i class="fas fa-file-invoice"></i></span> Voucher</div>
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label">Date <span class="text-danger">*</span></label>
-                            <input type="date" name="expense_date" class="form-control" value="<?= htmlspecialchars($today, ENT_QUOTES) ?>" required>
+                            <label class="form-label" for="expense_date">Date <span class="text-danger">*</span></label>
+                            <?php
+                            $minPosting = $min_posting_date ?? null;
+                            $expenseDate = $today;
+                            if ($minPosting && $expenseDate < $minPosting) {
+                                $expenseDate = $minPosting;
+                            }
+                            ?>
+                            <input type="date" name="expense_date" id="expense_date" class="form-control"
+                                   value="<?= htmlspecialchars($expenseDate, ENT_QUOTES) ?>"
+                                   <?= $minPosting ? 'min="' . htmlspecialchars($minPosting, ENT_QUOTES) . '"' : '' ?>
+                                   required aria-required="true">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Amount (Tk) <span class="text-danger">*</span></label>
-                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required>
+                            <label class="form-label" for="amount">Amount (Tk) <span class="text-danger">*</span></label>
+                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required aria-required="true" inputmode="decimal" autocomplete="off">
                         </div>
                         <div class="col-12">
                             <label class="form-label">Expense head <span class="text-danger">*</span></label>

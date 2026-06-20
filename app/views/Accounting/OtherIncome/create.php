@@ -24,23 +24,23 @@ $banks = $banks ?? [];
 
     <div class="branch-form-layout has-aside">
         <div class="branch-form-panel">
-            <form id="otherIncomeForm" novalidate>
+            <form id="otherIncomeForm" novalidate aria-label="Record other income">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>">
 
                 <div class="branch-form-section">
                     <div class="branch-form-section-head"><span class="icon-wrap green"><i class="fas fa-file-invoice"></i></span> Voucher</div>
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label">Date <span class="text-danger">*</span></label>
-                            <input type="date" name="income_date" id="income_date" class="form-control" value="<?= htmlspecialchars($today, ENT_QUOTES) ?>" required>
+                            <label class="form-label" for="income_date">Date <span class="text-danger">*</span></label>
+                            <input type="date" name="income_date" id="income_date" class="form-control" value="<?= htmlspecialchars($today, ENT_QUOTES) ?>" required aria-required="true">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Amount (Tk) <span class="text-danger">*</span></label>
-                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required>
+                            <label class="form-label" for="amount">Amount (Tk) <span class="text-danger">*</span></label>
+                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required aria-required="true" inputmode="decimal" autocomplete="off">
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Income head <span class="text-danger">*</span></label>
-                            <select name="ledger_id" id="ledger_id" class="form-select" required>
+                            <label class="form-label" for="ledger_id">Income head <span class="text-danger">*</span></label>
+                            <select name="ledger_id" id="ledger_id" class="form-select" required aria-required="true">
                                 <option value="">— Select income account —</option>
                                 <?php foreach ($ledgers as $l): ?>
                                 <option value="<?= (int)$l['id'] ?>"><?= htmlspecialchars($l['ledger_name'], ENT_QUOTES) ?></option>
@@ -48,8 +48,8 @@ $banks = $banks ?? [];
                             </select>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Narration</label>
-                            <textarea name="narration" class="form-control" rows="2" placeholder="Purpose of receipt…"></textarea>
+                            <label class="form-label" for="narration">Narration</label>
+                            <textarea name="narration" id="narration" class="form-control" rows="2" placeholder="Purpose of receipt…"></textarea>
                         </div>
                     </div>
                 </div>

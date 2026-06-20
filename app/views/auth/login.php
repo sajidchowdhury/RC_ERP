@@ -2,6 +2,7 @@
 // app/views/auth/login.php
 $title = $title ?? 'Login';
 $error = $error ?? null;
+$rememberDays = defined('AUTH_REMEMBER_DAYS') ? (int)AUTH_REMEMBER_DAYS : 30;
 ?>
 
 <!DOCTYPE html>
@@ -64,7 +65,7 @@ $error = $error ?? null;
                                        autocomplete="username">
                             </div>
 
-                            <div class="mb-4">
+                            <div class="mb-3">
                                 <label class="form-label">Password</label>
                                 <input type="password" 
                                        name="password" 
@@ -73,10 +74,19 @@ $error = $error ?? null;
                                        autocomplete="current-password">
                             </div>
 
+                            <div class="mb-4 form-check">
+                                <input type="checkbox" class="form-check-input" name="remember_me" value="1" id="rememberMe">
+                                <label class="form-check-label" for="rememberMe">Remember me for <?= (int)$rememberDays ?> days</label>
+                            </div>
+
                             <button type="submit" class="btn btn-primary btn-lg w-100">
                                 <i class="fas fa-sign-in-alt me-2"></i> Login
                             </button>
                         </form>
+
+                        <div class="text-center mt-3">
+                            <a href="<?= BASE_URL ?>auth/forgot" class="text-decoration-none small">Forgot password?</a>
+                        </div>
 
                         <div class="text-center mt-4 text-muted small">
                            

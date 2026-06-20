@@ -3,6 +3,7 @@
 
 require_once '../core/Database.php';
 require_once __DIR__ . '/../helpers/Helper.php';
+require_once __DIR__ . '/../../core/RoleRegistry.php';
 
 
 class EmployeeModel extends Helper {
@@ -26,11 +27,29 @@ class EmployeeModel extends Helper {
     }
 
     /**
+     * Active employees that do not yet have a linked system user account.
+     */
+    public function getEmployeesWithoutUserAccount(): array
+    {
+        $this->db->query("
+            SELECT e.id, e.name, e.employee_code, e.role, b.branch_name
+            FROM employees e
+            LEFT JOIN users u ON u.employee_id = e.id AND u.deleted_at IS NULL
+            LEFT JOIN branches b ON b.id = e.branch_id
+            WHERE u.id IS NULL
+              AND e.deleted_at IS NULL
+            ORDER BY e.name ASC
+        ");
+
+        return $this->db->resultSet();
+    }
+
+    /**
      * Summary metrics for employee index hero.
      */
     public function getEmployeeIndexStats(): array
     {
-        $empNotDeleted = "(e.deleted_at IS NULL OR e.deleted_at = '0000-00-00 00:00:00')";
+        $empNotDeleted = "e.deleted_at IS NULL";
         $stats = [
             'active'    => 0,
             'inactive'  => 0,
@@ -97,7 +116,7 @@ class EmployeeModel extends Helper {
         $length         = (int)($params['length'] ?? 25);
         $searchValue    = trim($params['search']['value'] ?? '');
         $orderColumn    = (int)($params['order'][0]['column'] ?? 0);
-        $orderDir       = $params['order'][0]['dir'] ?? 'asc';
+        $orderDir       = strtolower((string)($params['order'][0]['dir'] ?? 'asc')) === 'desc' ? 'DESC' : 'ASC';
 
         // Custom filters
         $filterBranch   = $params['filterBranch'] ?? '';
@@ -120,7 +139,7 @@ class EmployeeModel extends Helper {
         $bindParams = [];
 
         if (!$includeDeleted) {
-            $where[] = "(e.deleted_at IS NULL OR e.deleted_at = '0000-00-00 00:00:00')";
+            $where[] = "e.deleted_at IS NULL";
         }
 
         // Global search
@@ -159,7 +178,7 @@ class EmployeeModel extends Helper {
         // Total records (without filters)
         $totalQuery = "SELECT COUNT(DISTINCT e.id) as total {$baseQuery}";
         if (!$includeDeleted) {
-            $totalQuery .= " WHERE (e.deleted_at IS NULL OR e.deleted_at = '0000-00-00 00:00:00')";
+            $totalQuery .= " WHERE e.deleted_at IS NULL";
         }
         $this->db->query($totalQuery);
         $totalResult = $this->db->single();
@@ -208,6 +227,183 @@ class EmployeeModel extends Helper {
     return $this->Get_Employee_By_Id($id);    
     }
 
+    /**
+     * Validate and normalize employee create/update payload.
+     *
+     * @return array{status: string, message?: string, data?: array<string, mixed>}
+     */
+    public function validateEmployeePayload(array $data, ?int $excludeEmployeeId = null): array
+    {
+        $name = trim((string)($data['name'] ?? ''));
+        if ($name === '') {
+            return ['status' => 'error', 'message' => 'Full name is required.'];
+        }
+        if (mb_strlen($name) > 100) {
+            return ['status' => 'error', 'message' => 'Full name must be 100 characters or fewer.'];
+        }
+
+        $mobile = preg_replace('/\s+/', '', trim((string)($data['mobile'] ?? '')));
+        if ($mobile === '') {
+            return ['status' => 'error', 'message' => 'Mobile number is required.'];
+        }
+        if (!preg_match('/^[0-9+\-()]{6,20}$/', $mobile)) {
+            return ['status' => 'error', 'message' => 'Enter a valid mobile number.'];
+        }
+
+        $email = strtolower(trim((string)($data['email'] ?? '')));
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['status' => 'error', 'message' => 'Enter a valid email address.'];
+        }
+        if ($email !== '' && mb_strlen($email) > 100) {
+            return ['status' => 'error', 'message' => 'Email must be 100 characters or fewer.'];
+        }
+
+        $branchId = (int)($data['branch_id'] ?? 0);
+        if ($branchId <= 0) {
+            return ['status' => 'error', 'message' => 'Please select a branch.'];
+        }
+
+        require_once __DIR__ . '/BranchModel.php';
+        $branchModel = new BranchModel();
+        $branch = $branchModel->getBranchById($branchId);
+        if (!$branch || empty($branch['is_active'])) {
+            return ['status' => 'error', 'message' => 'Selected branch is invalid or inactive.'];
+        }
+
+        $role = RoleRegistry::normalize((string)($data['role'] ?? ''));
+        if ($role === '' || !RoleRegistry::isValid($role)) {
+            return ['status' => 'error', 'message' => 'Please select a valid role.'];
+        }
+
+        if ($this->mobileExists($mobile, $excludeEmployeeId)) {
+            return ['status' => 'error', 'message' => 'This mobile number is already assigned to another employee.'];
+        }
+
+        if ($email !== '' && $this->emailExists($email, $excludeEmployeeId)) {
+            return ['status' => 'error', 'message' => 'This email is already assigned to another employee.'];
+        }
+
+        $salary = $data['salary'] ?? 0;
+        if ($salary !== '' && $salary !== null && !is_numeric($salary)) {
+            return ['status' => 'error', 'message' => 'Salary must be a valid number.'];
+        }
+        $salary = round((float)$salary, 2);
+        if ($salary < 0) {
+            return ['status' => 'error', 'message' => 'Salary cannot be negative.'];
+        }
+
+        foreach (['date_of_birth' => 'date of birth', 'joining_date' => 'joining date'] as $field => $label) {
+            $value = trim((string)($data[$field] ?? ''));
+            if ($value !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                return ['status' => 'error', 'message' => "Invalid {$label}."];
+            }
+        }
+
+        $normalized = $data;
+        $normalized['name'] = $name;
+        $normalized['mobile'] = $mobile;
+        $normalized['email'] = $email !== '' ? $email : null;
+        $normalized['branch_id'] = $branchId;
+        $normalized['role'] = $role;
+        $normalized['salary'] = $salary;
+        $normalized['father_name'] = $this->nullableString($data['father_name'] ?? null, 100);
+        $normalized['mother_name'] = $this->nullableString($data['mother_name'] ?? null, 100);
+        $normalized['nid'] = $this->nullableString($data['nid'] ?? null, 30);
+        $normalized['address'] = $this->nullableString($data['address'] ?? null, 65535);
+        $normalized['designation'] = $this->nullableString($data['designation'] ?? null, 100);
+        $normalized['department'] = $this->nullableString($data['department'] ?? null, 100);
+        $normalized['bank_account'] = $this->nullableString($data['bank_account'] ?? null, 50);
+        $normalized['blood_group'] = $this->nullableString($data['blood_group'] ?? null, 10);
+        $normalized['date_of_birth'] = $this->nullableString($data['date_of_birth'] ?? null, 10);
+        $normalized['joining_date'] = $this->nullableString($data['joining_date'] ?? null, 10);
+        $normalized['is_active'] = (int)($data['is_active'] ?? 1) === 1 ? 1 : 0;
+
+        return ['status' => 'success', 'data' => $normalized];
+    }
+
+    private function nullableString(mixed $value, int $maxLength): ?string
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return null;
+        }
+
+        return mb_substr($value, 0, $maxLength);
+    }
+
+    private function mobileExists(string $mobile, ?int $excludeEmployeeId = null): bool
+    {
+        $sql = 'SELECT id FROM employees WHERE mobile = :mobile AND deleted_at IS NULL';
+        if ($excludeEmployeeId) {
+            $sql .= ' AND id != :exclude_id';
+        }
+        $sql .= ' LIMIT 1';
+
+        $this->db->query($sql);
+        $this->db->bind(':mobile', $mobile);
+        if ($excludeEmployeeId) {
+            $this->db->bind(':exclude_id', $excludeEmployeeId);
+        }
+
+        return (bool)$this->db->single();
+    }
+
+    private function emailExists(string $email, ?int $excludeEmployeeId = null): bool
+    {
+        $sql = 'SELECT id FROM employees WHERE LOWER(email) = :email AND deleted_at IS NULL';
+        if ($excludeEmployeeId) {
+            $sql .= ' AND id != :exclude_id';
+        }
+        $sql .= ' LIMIT 1';
+
+        $this->db->query($sql);
+        $this->db->bind(':email', strtolower($email));
+        if ($excludeEmployeeId) {
+            $this->db->bind(':exclude_id', $excludeEmployeeId);
+        }
+
+        return (bool)$this->db->single();
+    }
+
+    /**
+     * Bump linked user credential stamp so other sessions must re-login.
+     */
+    public function touchLinkedUserCredential(int $employeeId): void
+    {
+        require_once __DIR__ . '/../../core/CredentialVersion.php';
+        CredentialVersion::bumpForEmployee($employeeId);
+    }
+
+    /**
+     * Refresh session credential stamp for the logged-in user linked to an employee.
+     */
+    public function refreshSessionCredentialForEmployee(int $employeeId): void
+    {
+        if ($employeeId !== (int)($_SESSION['employee_id'] ?? 0)) {
+            return;
+        }
+
+        require_once __DIR__ . '/../../core/CredentialVersion.php';
+        CredentialVersion::syncSession((int)($_SESSION['user_id'] ?? 0));
+
+        $this->db->query('
+            SELECT u.username
+            FROM users u
+            WHERE u.employee_id = :employee_id
+              AND u.deleted_at IS NULL
+            ORDER BY u.id DESC
+            LIMIT 1
+        ');
+        $this->db->bind(':employee_id', $employeeId);
+        $row = $this->db->single();
+
+        if (!$row) {
+            return;
+        }
+
+        $_SESSION['username'] = (string)($row['username'] ?? $_SESSION['username'] ?? '');
+    }
+
 
     public function generateEmployeeCode()
     {
@@ -252,7 +448,11 @@ class EmployeeModel extends Helper {
     $this->db->bind(':salary', $data['salary'] ?? 0.00);
     $this->db->bind(':bank', $data['bank_account'] ?? null);
     $this->db->bind(':blood', $data['blood_group'] ?? null);
-    $this->db->bind(':created_by', $_SESSION['user_id'] ?? 1);
+    $createdBy = (int)($_SESSION['user_id'] ?? 0);
+    if ($createdBy <= 0) {
+        return false;
+    }
+    $this->db->bind(':created_by', $createdBy);
 
     if ($this->db->execute()) {
         return $this->db->lastInsertId();

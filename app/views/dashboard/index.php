@@ -1,7 +1,7 @@
 <?php
+require_once __DIR__ . '/../../helpers/AccountingNavHelper.php';
 ob_start();
 $title = $title ?? 'My Sales Cockpit';
-$userName = htmlspecialchars($user_name ?? 'Sales Rep');
 $todayDate = $today_date ?? date('d M, Y');
 
 // Personal metrics from controller (strictly user-wise - only things related to logged-in user)
@@ -12,6 +12,18 @@ $myPipeline = (int)($my_pipeline ?? 385000);
 $myWinRate = $my_win_rate ?? 71.5;
 $myDeals = (int)($my_deals_closed ?? 9);
 $myActivities = (int)($my_activities ?? 47);
+
+// Daily joke instead of welcome message
+$jokes = [
+    "Why did the salesperson bring a ladder? To reach new heights!",
+    "I told my boss I needed a raise. He said, 'You are the raise — now go close some deals!'",
+    "Why don't salespeople play hide and seek? Because good luck hiding from a follow-up call!",
+    "What's a salesperson's favorite type of music? Heavy metal... because they love closing deals!",
+    "Why did the CRM go to therapy? Too many unresolved issues.",
+    "Parallel lines have so much in common... it's a shame they'll never meet. Unlike our hot leads!",
+    "Why was the sales report so calm? It had a lot of figures but no drama."
+];
+$dailyJoke = $jokes[array_rand($jokes)];
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/sales-cockpit.css">
 
@@ -20,8 +32,8 @@ $myActivities = (int)($my_activities ?? 47);
     <header class="sales-cockpit-hero">
         <div>
             <h1>
-                <i class="fas fa-user-tie me-2"></i>
-                Good morning, <?= explode(' ', $userName)[0] ?>!
+                <i class="fas fa-laugh-beam me-2"></i>
+                <?= htmlspecialchars($dailyJoke) ?>
             </h1>
             <p>
                 Your personal sales cockpit — everything that matters to <strong>you</strong> today.
@@ -43,6 +55,18 @@ $myActivities = (int)($my_activities ?? 47);
             </button>
         </div>
     </header>
+
+    <?php if (AccountingNavHelper::canSeeAccountingNav()): ?>
+    <div class="alert alert-light border d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3 py-2">
+        <div>
+            <strong><i class="fas fa-calculator me-1 text-teal"></i> Accounting dashboard</strong>
+            <span class="text-muted small ms-1">Trial balance, reconciliation traffic lights, and recent journals.</span>
+        </div>
+        <a href="<?= BASE_URL ?>Accounting/index" class="btn btn-primary btn-sm">
+            <i class="fas fa-arrow-right me-1"></i> Open accounting home
+        </a>
+    </div>
+    <?php endif; ?>
 
     <!-- Personal Stats - branch-stat-card style -->
     <div class="sales-cockpit-stats">

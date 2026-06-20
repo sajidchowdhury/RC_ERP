@@ -26,6 +26,8 @@
 
     <ul class="nav flex-column flex-grow-1" id="sidebarMenu">
 
+        <?php include __DIR__ . '/../partials/accounting_sidebar_menu.php'; ?>
+
         <?php foreach ($menus as $mainMenu): ?>
             <?php 
             $isActiveMain = $this->isActiveMenu($mainMenu);

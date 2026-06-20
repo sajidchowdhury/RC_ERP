@@ -5,6 +5,7 @@ require_once '../core/BaseController.php';
 require_once '../app/models/StockAdjustmentModel.php';
 require_once '../app/models/StockAdjustmentAuditModel.php';
 require_once '../app/helpers/Helper.php';
+require_once '../app/helpers/StockGlAuditHelper.php';
 
 class StockAdjustmentController extends BaseController {
 
@@ -69,11 +70,11 @@ class StockAdjustmentController extends BaseController {
         $audit = (new StockAdjustmentAuditModel())->runAdjustmentChecks((int)$id);
 
         $this->view('StockAdjustment/details', [
-            'title'          => 'Adjustment #' . ($adjustment['adjustment_code'] ?? ''),
-            'adjustment'     => $adjustment,
-            'items'          => $this->model->getAdjustmentItems((int)$id),
-            'movements'      => $this->model->getAdjustmentMovements((int)$id),
-            'journal_entry'  => $this->model->getJournalEntryForAdjustment((int)$id),
+            'title'            => 'Adjustment #' . ($adjustment['adjustment_code'] ?? ''),
+            'adjustment'       => $adjustment,
+            'items'            => $this->model->getAdjustmentItems((int)$id),
+            'movements'        => $this->model->getAdjustmentMovements((int)$id),
+            'journal_blocks'   => StockGlAuditHelper::adjustmentJournalBlocks($adjustment),
             'adjustment_audit' => $audit,
         ]);
     }

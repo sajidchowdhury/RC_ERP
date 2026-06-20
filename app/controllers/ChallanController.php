@@ -5,6 +5,8 @@ require_once '../core/BaseController.php';
 require_once '../app/models/ChallanModel.php';
 require_once '../core/UserAudit.php';
 require_once '../app/helpers/Helper.php';
+require_once '../app/services/Notification/SalesTelegramNotifier.php';
+require_once '../app/helpers/SalesGlAuditHelper.php';
 
 class ChallanController extends BaseController {
 
@@ -31,11 +33,14 @@ public function index() {
 
     $sessionBranchId = Helper::sessionBranchId();
     $branch = $this->model->getBranch($sessionBranchId);
+    $queueSummary = $this->model->getChallanFilterSummary(['skip_default_today' => true]);
 
     $data = [
         'title'               => 'Warehouse — Godown & Challan',
         'filters'             => $filters,
         'session_branch_name' => $branch['branch_name'] ?? 'Branch',
+        'open_queue_count'    => (int)($queueSummary['open'] ?? 0),
+        'needs_challan_count' => (int)($queueSummary['needs_challan'] ?? 0),
     ];
 
     $this->view('challan/index', $data);
@@ -108,6 +113,23 @@ public function index() {
             'invoice' => $invoice,
             'can_reverse_challan' => in_array($role, ['admin', 'manager'], true)
                 && ($invoice['status'] ?? '') === 'challan_completed',
+        ]);
+    }
+
+    public function details($id = null) {
+        if (!$id) {
+            $this->abortPage('Invalid challan.', 'challan');
+        }
+
+        $challan = $this->model->getChallanForDetail((int)$id);
+        if (!$challan) {
+            $this->abortPage('Challan not found or access denied.', 'challan');
+        }
+
+        $this->view('challan/details', [
+            'title'          => 'Challan — ' . ($challan['challan_code'] ?? ''),
+            'challan'        => $challan,
+            'journal_blocks' => SalesGlAuditHelper::challanJournalBlocks($challan),
         ]);
     }
 
@@ -188,14 +210,29 @@ public function index() {
         $this->validateCSRF();
         $result = $this->model->finalizeChallan($_POST);
         if (($result['status'] ?? '') === 'success') {
-            $this->userAudit->log($_SESSION['user_id'] ?? 0, 'challan_completed', (int)($result['challan_id'] ?? 0), [
+            $challanId = (int)($result['challan_id'] ?? 0);
+            $invoiceId = (int)($result['invoice_id'] ?? $_POST['invoice_id'] ?? 0);
+            $this->userAudit->log($_SESSION['user_id'] ?? 0, 'challan_completed', $challanId, [
                 'challan_code'          => $result['challan_code'] ?? null,
-                'invoice_id'            => (int)($result['invoice_id'] ?? $_POST['invoice_id'] ?? 0),
+                'invoice_id'            => $invoiceId,
                 'transport_adjustment'  => $result['transport_adjustment'] ?? 0,
                 'new_total'             => $result['new_total'] ?? null,
                 'journal_entry_id'      => $result['journal_entry_id'] ?? null,
                 'cogs_amount'           => $result['cogs_amount'] ?? null,
             ]);
+
+            // Telegram: salesman, sales-by, and branch warehouse managers (non-blocking).
+            SalesTelegramNotifier::safe(function () use ($challanId, $invoiceId, $result) {
+                $payload = $this->model->getChallanTelegramPayload(
+                    $challanId,
+                    $invoiceId,
+                    (string)($result['challan_code'] ?? ''),
+                    isset($result['new_total']) ? (float)$result['new_total'] : null
+                );
+                if ($payload) {
+                    (new SalesTelegramNotifier())->notifyChallanCreated($payload);
+                }
+            });
         }
         $this->sendJson($result);
     }

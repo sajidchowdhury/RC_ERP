@@ -1,10 +1,13 @@
 <?php
-/** @var array $product @var array $categories @var array $units @var bool $isEdit */
+/** @var array $product @var array $categories @var array $groups @var array $units @var bool $isEdit */
 $product = $product ?? [];
 $categories = $categories ?? [];
+$groups = $groups ?? [];
+$defaultGroupId = $defaultGroupId ?? 1;
 $units = $units ?? ['Pcs', 'Carton', 'KG', 'Bag', 'Dobe', 'Set'];
 $isEdit = !empty($isEdit);
 $publicUrl = $publicUrl ?? (defined('PUBLIC_URL') ? PUBLIC_URL : BASE_URL);
+$selectedGroupId = (int)($product['group_id'] ?? $defaultGroupId);
 ?>
 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>">
 
@@ -36,6 +39,18 @@ $publicUrl = $publicUrl ?? (defined('PUBLIC_URL') ? PUBLIC_URL : BASE_URL);
                     </option>
                 <?php endforeach; ?>
             </select>
+        </div>
+        <div class="col-12 col-md-6">
+            <label class="form-label" for="group_id">Group <span class="text-danger">*</span></label>
+            <select id="group_id" name="group_id" class="form-select" required>
+                <?php foreach ($groups as $grp): ?>
+                    <option value="<?= (int)$grp['id'] ?>"
+                        <?= $selectedGroupId === (int)$grp['id'] ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($grp['group_name'] ?? '', ENT_QUOTES) ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <div class="form-text">Default for new products: China</div>
         </div>
     </div>
 </div>

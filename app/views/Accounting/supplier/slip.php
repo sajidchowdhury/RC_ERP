@@ -63,10 +63,9 @@ $title = $title ?? ('Supplier Payment Slip — ' . ($t['payment_code'] ?? ''));
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/invoice-print.css">
-    <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/customer-payment-slip-print.css">
-    <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/supplier-payment-slip-print.css">
+    <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/entity-voucher-slip-print.css">
 </head>
-<body class="invoice-print-body customer-payment-slip-body supp-payment-slip-body">
+<body class="invoice-print-body entity-voucher-slip-body customer-payment-slip-body supp-payment-slip-body">
 
 <div class="customer-payment-slip-toolbar no-print">
     <button type="button" class="btn btn-light" onclick="window.print()">

@@ -2,7 +2,7 @@
 ob_start();
 $title = $title ?? 'Edit Branch';
 $branch = $branch ?? [];
-$usage = $usage ?? ['warehouses' => 0, 'employees' => 0];
+$usage = $usage ?? ['warehouses' => 0, 'employees' => 0, 'open_invoices' => 0, 'pending_demands' => 0, 'active_users' => 0];
 $branchId = (int)($branch['id'] ?? 0);
 $isActive = !empty($branch['is_active']);
 ?>
@@ -19,6 +19,9 @@ $isActive = !empty($branch['is_active']);
             </span>
         </div>
         <div class="branch-hub-actions">
+            <a href="<?= BASE_URL ?>branch/show/<?= $branchId ?>" class="btn btn-outline-light btn-sm">
+                <i class="fas fa-sitemap me-1"></i> Hub
+            </a>
             <a href="<?= BASE_URL ?>branch/audit" class="btn btn-outline-light btn-sm">
                 <i class="fas fa-clock-rotate-left me-1"></i> Audit
             </a>
@@ -63,17 +66,44 @@ $isActive = !empty($branch['is_active']);
                 <span><i class="fas fa-users text-muted me-1"></i> Employees</span>
                 <strong><?= (int)($usage['employees'] ?? 0) ?></strong>
             </div>
+            <div class="branch-aside-stat">
+                <span><i class="fas fa-receipt text-muted me-1"></i> Open invoices</span>
+                <strong><?= (int)($usage['open_invoices'] ?? 0) ?></strong>
+            </div>
+            <div class="branch-aside-stat">
+                <span><i class="fas fa-truck-ramp-box text-muted me-1"></i> Pending demands</span>
+                <strong><?= (int)($usage['pending_demands'] ?? 0) ?></strong>
+            </div>
+            <div class="branch-aside-stat">
+                <span><i class="fas fa-user-shield text-muted me-1"></i> Active users</span>
+                <strong><?= (int)($usage['active_users'] ?? 0) ?></strong>
+            </div>
 
-            <?php if ((int)($usage['warehouses'] ?? 0) > 0 || (int)($usage['employees'] ?? 0) > 0): ?>
+            <?php
+            $hasBlockers = ((int)($usage['warehouses'] ?? 0) > 0)
+                || ((int)($usage['employees'] ?? 0) > 0)
+                || ((int)($usage['open_invoices'] ?? 0) > 0)
+                || ((int)($usage['pending_demands'] ?? 0) > 0)
+                || ((int)($usage['active_users'] ?? 0) > 0);
+            if ($hasBlockers):
+            ?>
             <div class="branch-aside-tip">
-                Reassign or deactivate linked warehouses and employees before setting this branch inactive from the list.
+                Resolve linked warehouses, employees, open invoices, pending demands, and active users before deactivating this branch.
             </div>
             <?php endif; ?>
 
             <div class="mt-3 d-grid gap-2">
-                <a href="<?= BASE_URL ?>warehouse" class="btn btn-sm btn-outline-secondary">
-                    <i class="fas fa-warehouse me-1"></i> Warehouses
+                <a href="<?= BASE_URL ?>branch/show/<?= $branchId ?>" class="btn btn-sm btn-outline-secondary">
+                    <i class="fas fa-sitemap me-1"></i> Branch hub
                 </a>
+                <a href="<?= BASE_URL ?>warehouse?branch=<?= $branchId ?>" class="btn btn-sm btn-outline-secondary">
+                    <i class="fas fa-warehouse me-1"></i> Warehouses (filtered)
+                </a>
+                <?php if (Auth::isAdmin()): ?>
+                <a href="<?= BASE_URL ?>warehouse/create?branch=<?= $branchId ?>" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-plus me-1"></i> Add warehouse
+                </a>
+                <?php endif; ?>
             </div>
         </aside>
     </div>

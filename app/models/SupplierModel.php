@@ -23,12 +23,16 @@ class SupplierModel extends Helper{
         return $this->Get_Supplier_By_Id($id);
     }
 
-    // Auto generate supplier code
-    private function generateSupplierCode() {
-        $this->db->query("SELECT COUNT(*) as total FROM suppliers");
+    // Auto generate supplier code (sequential from latest code, not row count)
+    private function generateSupplierCode(): string
+    {
+        $this->db->query("SELECT supplier_code FROM suppliers ORDER BY id DESC LIMIT 1");
         $row = $this->db->single();
-        $next = str_pad($row['total'] + 1, 4, '0', STR_PAD_LEFT);
-        return "S-" . $next;
+        $nextNum = 1;
+        if (!empty($row['supplier_code']) && preg_match('/S-(\d+)/', (string)$row['supplier_code'], $m)) {
+            $nextNum = (int)$m[1] + 1;
+        }
+        return 'S-' . str_pad((string)$nextNum, 4, '0', STR_PAD_LEFT);
     }
 
     // Check mobile uniqueness
@@ -43,11 +47,79 @@ class SupplierModel extends Helper{
         return $this->db->single() ? true : false;
     }
 
-    public function createSupplier($data) {
-        if ($this->mobileExists($data['mobile'])) {
-            return ['status' => 'error', 'message' => 'This mobile number already exists!'];
+    /**
+     * Validate supplier form input for create/update.
+     *
+     * @return array{ok: bool, error?: string, data?: array<string, mixed>}
+     */
+    public function validateSupplierPayload(array $input, ?int $excludeId = null): array
+    {
+        $supplierName = trim((string)($input['supplier_name'] ?? ''));
+        $mobile = trim((string)($input['mobile'] ?? ''));
+        $address = trim((string)($input['address'] ?? ''));
+
+        if ($supplierName === '') {
+            return ['ok' => false, 'error' => 'Supplier name is required.'];
+        }
+        if ($mobile === '') {
+            return ['ok' => false, 'error' => 'Mobile number is required.'];
+        }
+        if ($this->mobileExists($mobile, $excludeId)) {
+            return ['ok' => false, 'error' => 'This mobile number already exists!'];
         }
 
+        $payload = [
+            'supplier_name' => $supplierName,
+            'mobile'        => $mobile,
+            'address'       => $address,
+        ];
+
+        if ($excludeId !== null) {
+            $existing = $this->getSupplierById($excludeId);
+            if (!$existing) {
+                return ['ok' => false, 'error' => 'Supplier not found.'];
+            }
+
+            $newActive = (int)($input['is_active'] ?? 1) === 1 ? 1 : 0;
+            $wasActive = !empty($existing['is_active']);
+
+            if ($wasActive && !$newActive) {
+                $safety = $this->getDeactivationSafetyStatus($excludeId);
+                if (!$safety['can_deactivate']) {
+                    return ['ok' => false, 'error' => $this->getDeactivationMessage($excludeId)];
+                }
+            }
+
+            $payload['is_active'] = $newActive;
+        }
+
+        return ['ok' => true, 'data' => $payload];
+    }
+
+    public function getDeactivationMessage(int $supplierId): string
+    {
+        $safety = $this->getDeactivationSafetyStatus($supplierId);
+        $msg = 'Cannot deactivate this supplier.';
+        if (!empty($safety['has_outstanding'])) {
+            $msg .= ' Outstanding balance: ' . number_format((float)$safety['outstanding_balance'], 2);
+        }
+        if (!empty($safety['has_purchase_history'])) {
+            $msg .= (!empty($safety['has_outstanding']) ? '. ' : ' ')
+                . 'Has ' . number_format((int)$safety['purchase_count']) . ' purchase record(s).';
+        }
+        $msg .= ' Clear dues before changing status.';
+
+        return $msg;
+    }
+
+    public function createSupplier(array $data): array
+    {
+        $validated = $this->validateSupplierPayload($data);
+        if (!$validated['ok']) {
+            return ['status' => 'error', 'message' => $validated['error']];
+        }
+
+        $payload = $validated['data'];
         $supplier_code = $this->generateSupplierCode();
 
         $this->db->query("
@@ -58,21 +130,32 @@ class SupplierModel extends Helper{
         ");
 
         $this->db->bind(':supplier_code', $supplier_code);
-        $this->db->bind(':supplier_name', trim($data['supplier_name']));
-        $this->db->bind(':mobile', trim($data['mobile']));
-        $this->db->bind(':address', trim($data['address'] ?? ''));
+        $this->db->bind(':supplier_name', $payload['supplier_name']);
+        $this->db->bind(':mobile', $payload['mobile']);
+        $this->db->bind(':address', $payload['address']);
         $this->db->bind(':created_by', $_SESSION['user_id'] ?? 1);
 
         if ($this->db->execute()) {
-            return ['status' => 'success', 'message' => 'Supplier created successfully!'];
+            return [
+                'status'        => 'success',
+                'message'       => 'Supplier created successfully!',
+                'id'            => (int)$this->db->lastInsertId(),
+                'supplier_code' => $supplier_code,
+            ];
         }
+
         return ['status' => 'error', 'message' => 'Failed to create supplier!'];
     }
 
-    public function updateSupplier($id, $data) {
-        if ($this->mobileExists($data['mobile'], $id)) {
-            return ['status' => 'error', 'message' => 'This mobile number already exists!'];
+    public function updateSupplier($id, array $data): array
+    {
+        $supplierId = (int)$id;
+        $validated = $this->validateSupplierPayload($data, $supplierId);
+        if (!$validated['ok']) {
+            return ['status' => 'error', 'message' => $validated['error']];
         }
+
+        $payload = $validated['data'];
 
         $this->db->query("
             UPDATE suppliers SET 
@@ -84,15 +167,16 @@ class SupplierModel extends Helper{
             WHERE id = :id
         ");
 
-        $this->db->bind(':supplier_name', trim($data['supplier_name']));
-        $this->db->bind(':mobile', trim($data['mobile']));
-        $this->db->bind(':address', trim($data['address'] ?? ''));
-        $this->db->bind(':is_active', $data['is_active'] ?? 1);
-        $this->db->bind(':id', $id);
+        $this->db->bind(':supplier_name', $payload['supplier_name']);
+        $this->db->bind(':mobile', $payload['mobile']);
+        $this->db->bind(':address', $payload['address']);
+        $this->db->bind(':is_active', $payload['is_active']);
+        $this->db->bind(':id', $supplierId);
 
         if ($this->db->execute()) {
             return ['status' => 'success', 'message' => 'Supplier updated successfully!'];
         }
+
         return ['status' => 'error', 'message' => 'Failed to update supplier!'];
     }
 
@@ -323,5 +407,95 @@ class SupplierModel extends Helper{
             'recordsFiltered' => $recordsFiltered,
             'data'            => $data
         ];
+    }
+
+    /**
+     * Hub summary for supplier show page.
+     */
+    public function getSupplierHubSummary(int $supplierId): array
+    {
+        $usage = $this->getSupplierUsage($supplierId);
+
+        $this->db->query('
+            SELECT COUNT(*) AS c FROM supplier_payments
+            WHERE supplier_id = :sid AND COALESCE(is_reversed, 0) = 0
+        ');
+        $this->db->bind(':sid', $supplierId);
+        $paymentCount = (int)($this->db->single()['c'] ?? 0);
+
+        return array_merge($usage, ['payment_count' => $paymentCount]);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRecentLedgerEntries(int $supplierId, int $limit = 15): array
+    {
+        if ($supplierId <= 0) {
+            return [];
+        }
+
+        $limit = max(1, min(50, $limit));
+        $this->db->query("
+            SELECT sl.id, sl.transaction_date, sl.reference_type, sl.reference_id,
+                   sl.debit, sl.credit, sl.running_balance, sl.remarks,
+                   b.branch_name
+            FROM supplier_ledger sl
+            LEFT JOIN branches b ON b.id = sl.branch_id
+            WHERE sl.supplier_id = :sid
+            ORDER BY sl.id DESC
+            LIMIT {$limit}
+        ");
+        $this->db->bind(':sid', $supplierId);
+
+        return $this->db->resultSet() ?: [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRecentPurchaseReceives(int $supplierId, int $limit = 10): array
+    {
+        if ($supplierId <= 0) {
+            return [];
+        }
+
+        $limit = max(1, min(30, $limit));
+        $this->db->query("
+            SELECT pr.id, pr.receive_code, pr.receive_date, pr.total_amount, pr.status,
+                   pr.is_reversed, br.branch_name
+            FROM purchase_receives pr
+            LEFT JOIN branches br ON br.id = pr.branch_id
+            WHERE pr.supplier_id = :sid
+            ORDER BY pr.receive_date DESC, pr.id DESC
+            LIMIT {$limit}
+        ");
+        $this->db->bind(':sid', $supplierId);
+
+        return $this->db->resultSet() ?: [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRecentPayments(int $supplierId, int $limit = 10): array
+    {
+        if ($supplierId <= 0) {
+            return [];
+        }
+
+        $limit = max(1, min(30, $limit));
+        $this->db->query("
+            SELECT sp.id, sp.payment_code, sp.payment_date, sp.amount, sp.transaction_type,
+                   sp.payment_mode, sp.is_reversed, br.branch_name
+            FROM supplier_payments sp
+            LEFT JOIN branches br ON br.id = sp.branch_id
+            WHERE sp.supplier_id = :sid
+            ORDER BY sp.payment_date DESC, sp.id DESC
+            LIMIT {$limit}
+        ");
+        $this->db->bind(':sid', $supplierId);
+
+        return $this->db->resultSet() ?: [];
     }
 }

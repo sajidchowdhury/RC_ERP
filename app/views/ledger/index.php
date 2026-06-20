@@ -3,6 +3,7 @@ ob_start();
 $title = $title ?? 'Chart of Accounts';
 $showInactive = !empty($showInactive);
 $stats = $stats ?? ['active' => 0, 'inactive' => 0, 'system' => 0, 'control' => 0];
+$natureGroups = $natureGroups ?? [];
 $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
@@ -49,12 +50,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
             <div><div class="stat-value"><?= (int)($stats['control'] ?? 0) ?></div><div class="stat-label">Control accounts</div></div>
         </div>
     </div>
-    <nav class="branch-hub-quick">
-        <a href="<?= BASE_URL ?>Report/TrialBalance"><i class="fas fa-table"></i> Trial balance</a>
-        <a href="<?= BASE_URL ?>SalesAudit"><i class="fas fa-clipboard-check"></i> Sales audit</a>
-        <a href="<?= BASE_URL ?>PurchaseAudit"><i class="fas fa-truck"></i> Purchase audit</a>
-        <a href="<?= BASE_URL ?>bank"><i class="fas fa-building-columns"></i> Bank accounts</a>
-    </nav>
+    <?php include __DIR__ . '/../partials/accounting_quick_nav.php'; ?>
     <?php endif; ?>
 
     <div class="branch-hub-panel">
@@ -76,14 +72,13 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                     <div class="filter-label">Nature</div>
                     <select id="filterLedgerNature" class="form-select form-select-sm">
                         <option value="">All natures</option>
-                        <option value="cash_bank">Cash &amp; Bank</option>
-                        <option value="customer_receivable">Customer Receivable</option>
-                        <option value="supplier_payable">Supplier Payable</option>
-                        <option value="inventory">Inventory</option>
-                        <option value="sales_revenue">Sales Revenue</option>
-                        <option value="cogs">COGS</option>
-                        <option value="operating_expense">Operating Expense</option>
-                        <option value="payroll_expense">Payroll</option>
+                        <?php foreach ($natureGroups as $groupLabel => $options): ?>
+                        <optgroup label="<?= htmlspecialchars($groupLabel, ENT_QUOTES) ?>">
+                            <?php foreach ($options as $value => $label): ?>
+                            <option value="<?= htmlspecialchars($value, ENT_QUOTES) ?>"><?= htmlspecialchars($label, ENT_QUOTES) ?></option>
+                            <?php endforeach; ?>
+                        </optgroup>
+                        <?php endforeach; ?>
                     </select>
                 </div>
                 <div class="col-sm-4 col-md-2">
@@ -108,6 +103,12 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                         <option value="">All active</option>
                         <option value="active">Active only</option>
                     </select>
+                </div>
+                <div class="col-sm-auto">
+                    <div class="form-check mt-4">
+                        <input class="form-check-input" type="checkbox" id="filterViewHierarchy" value="1">
+                        <label class="form-check-label small" for="filterViewHierarchy">Hierarchy view</label>
+                    </div>
                 </div>
                 <div class="col-sm-auto">
                     <button type="button" id="clearFilters" class="btn btn-outline-secondary btn-sm btn-clear">
@@ -178,17 +179,20 @@ function ledgerFlagsCell(row) {
     return h || '<span class="text-muted small">—</span>';
 }
 function ledgerNameCell(row) {
-    const indent = parseInt(row.parent_id,10) > 0 ? '<span class="text-muted me-1">↳</span>' : '';
+    const depth = parseInt(row.hierarchy_depth, 10) || 0;
+    const indentPx = depth * 14;
+    const indent = depth > 0 ? '<span class="ledger-tree-indent" style="padding-left:'+indentPx+'px"></span>' : '';
     const parent = row.parent_name
         ? '<div class="branch-contact d-lg-none"><i class="fas fa-level-up-alt"></i> '+ledgerEsc(row.parent_name)+'</div>'
         : '';
     return '<div class="branch-name-cell"><div class="branch-avatar">'+ledgerInitial(row.ledger_name)+'</div><div>'+indent+
-        '<div class="name">'+ledgerEsc(row.ledger_name)+'</div>'+
+        '<div class="name"><a href="'+LEDGER_BASE+'/show/'+row.id+'" class="text-decoration-none text-dark">'+ledgerEsc(row.ledger_name)+'</a></div>'+
         '<span class="branch-code-pill">'+ledgerEsc(row.ledger_code)+'</span>'+parent+'</div></div>';
 }
 function ledgerActions(row) {
     const id = row.id, isSystem = parseInt(row.is_system,10)===1;
     let h = '<div class="branch-action-bar">';
+    h += '<a href="'+LEDGER_BASE+'/show/'+id+'" class="btn-action view" title="Account hub"><i class="fas fa-book-open"></i></a>';
     h += '<a href="'+LEDGER_BASE+'/edit/'+id+'" class="btn-action '+(isSystem?'view':'edit')+'" title="'+(isSystem?'View protected':'Edit')+'">'+
         '<i class="fas fa-'+(isSystem?'eye':'pen')+'"></i></a>';
     if (!isSystem) {
@@ -210,6 +214,7 @@ $(function() {
                 d.filterIsControl    = $('#filterIsControl').val();
                 d.filterIsSystem     = $('#filterIsSystem').val();
                 d.filterStatus       = $('#filterStatus').val();
+                d.viewHierarchy      = $('#filterViewHierarchy').is(':checked') ? '1' : '';
             }
         },
         pageLength: 25, order: [[0,'asc']],
@@ -227,9 +232,10 @@ $(function() {
             { data: 'id', orderable: false, className: 'text-center', render: (d,t,r) => ledgerActions(r) }
         ]
     });
-    $('#filterAccountType, #filterLedgerNature, #filterIsControl, #filterIsSystem, #filterStatus').on('change', () => table.ajax.reload());
+    $('#filterAccountType, #filterLedgerNature, #filterIsControl, #filterIsSystem, #filterStatus, #filterViewHierarchy').on('change', () => table.ajax.reload());
     $('#clearFilters').on('click', () => {
         $('#filterAccountType, #filterLedgerNature, #filterIsControl, #filterIsSystem, #filterStatus').val('');
+        $('#filterViewHierarchy').prop('checked', false);
         table.ajax.reload();
     });
     window.ledgerTable = table;
@@ -240,14 +246,40 @@ function toggleLedgerStatus(id, isActive) {
     Swal.fire({
         title: active ? 'Deactivate this ledger?' : 'Activate this ledger?',
         html: active
-            ? 'Hidden from new postings; existing journal history is kept.'
+            ? 'Hidden from new postings; blocked if journal history or sole critical nature exists.'
             : 'Account will appear in dropdowns again.',
         icon: 'warning', showCancelButton: true,
         confirmButtonText: active ? 'Deactivate' : 'Activate',
         confirmButtonColor: active ? '#d33' : '#0d9488'
     }).then(r => {
         if (!r.isConfirmed) return;
-        window.location.href = LEDGER_BASE + '/toggle/' + id;
+
+        fetch(LEDGER_BASE + '/toggle/' + id, {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: new URLSearchParams({ csrf_token: LEDGER_CSRF })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                Swal.fire({
+                    title: 'Done',
+                    text: data.message,
+                    icon: 'success',
+                    timer: 1400,
+                    showConfirmButton: false
+                }).then(() => {
+                    if (window.ledgerTable) {
+                        window.ledgerTable.ajax.reload(null, false);
+                        return;
+                    }
+                    window.location.reload();
+                });
+            } else {
+                Swal.fire('Action blocked', data.message || 'Failed to update status.', 'error');
+            }
+        })
+        .catch(() => Swal.fire('Error', 'Something went wrong while updating the ledger.', 'error'));
     });
 }
 

@@ -47,12 +47,18 @@
         const lockGodown = boot.lockGodownAssignments === true;
 
         if (!lockGodown && !isCompleted) {
-            loadWarehousesForAllRows(branchId, invoiceId);
+            loadWarehousesForAllRows(branchId, invoiceId).then(() => {
+                initBulkWarehouseTools();
+                updateWarehouseProgress();
+            });
             loadDispatchers();
             bindWarehouseStockUpdates();
+        } else if (!isCompleted) {
+            initFillCtnButton();
         }
 
         initTransportTotalPreview();
+        initKeyboardShortcuts(form, invoiceId);
 
         const btnGodown = document.getElementById('btn-save-godown');
         const btnChallan = document.getElementById('btn-create-challan');
@@ -103,16 +109,113 @@
                 select.appendChild(opt);
             });
 
+            if (!select.value && data.length === 1) {
+                select.value = String(data[0].id);
+            }
+
             updateStockBadge(row);
+            refreshBulkWarehouseOptions();
         } catch (e) {
             console.error(e);
         }
+    }
+
+    function refreshBulkWarehouseOptions() {
+        const bulk = document.getElementById('chBulkWarehouse');
+        if (!bulk) return;
+        const seen = new Map();
+        document.querySelectorAll('.warehouse-select').forEach((sel) => {
+            Array.from(sel.options).forEach((opt) => {
+                if (!opt.value || seen.has(opt.value)) return;
+                seen.set(opt.value, opt.textContent);
+            });
+        });
+        const current = bulk.value;
+        bulk.innerHTML = '<option value="">— Choose warehouse —</option>';
+        seen.forEach((label, id) => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = label;
+            bulk.appendChild(opt);
+        });
+        if (current && seen.has(current)) bulk.value = current;
+    }
+
+    function initBulkWarehouseTools() {
+        const applyBtn = document.getElementById('chApplyBulkWarehouse');
+        const bulkSelect = document.getElementById('chBulkWarehouse');
+        if (applyBtn && bulkSelect) {
+            applyBtn.addEventListener('click', () => {
+                const wid = bulkSelect.value;
+                if (!wid) {
+                    Swal.fire('Select warehouse', 'Choose a warehouse to apply to all lines.', 'info');
+                    return;
+                }
+                document.querySelectorAll('#godownItemsTable tbody tr').forEach((row) => {
+                    const sel = row.querySelector('.warehouse-select');
+                    if (!sel) return;
+                    sel.value = wid;
+                    updateStockBadge(row);
+                });
+                updateWarehouseProgress();
+            });
+        }
+        initFillCtnButton();
+    }
+
+    function initFillCtnButton() {
+        const btn = document.getElementById('chFillAllCtn');
+        if (!btn || btn.dataset.bound === '1') return;
+        btn.dataset.bound = '1';
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#godownItemsTable tbody tr').forEach((row) => {
+                fillRowCtnFromOrder(row);
+            });
+        });
+    }
+
+    function fillRowCtnFromOrder(row) {
+        const pcs = parseFloat(row.dataset.pcsPerCarton) || 0;
+        const ordered = parseFloat(row.dataset.orderedQty) || 0;
+        const ctnInput = row.querySelector('.dispatched-ctn');
+        if (!ctnInput || pcs <= 0) return;
+        const ctn = ordered / pcs;
+        ctnInput.value = ctn.toFixed(2).replace(/\.?0+$/, '') || '0';
+    }
+
+    function updateWarehouseProgress() {
+        const bar = document.getElementById('chAssignProgressBar');
+        const label = document.getElementById('chAssignProgressLabel');
+        const rows = document.querySelectorAll('#godownItemsTable tbody tr');
+        if (!rows.length) return;
+        let set = 0;
+        rows.forEach((row) => {
+            const sel = row.querySelector('.warehouse-select');
+            const hidden = row.querySelector('input[name="warehouse_id[]"]');
+            if ((sel && sel.value) || (hidden && hidden.value)) set += 1;
+        });
+        const pct = Math.round((set / rows.length) * 100);
+        if (bar) bar.style.width = pct + '%';
+        if (label) label.textContent = `${set} / ${rows.length} warehouses set`;
+    }
+
+    function initKeyboardShortcuts(form, invoiceId) {
+        document.addEventListener('keydown', (e) => {
+            if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
+            if (!document.getElementById('challan-create-app')) return;
+            const boot = window.CHALLAN_CREATE_BOOT || {};
+            if (boot.isCompleted) return;
+            e.preventDefault();
+            const btn = document.getElementById('btn-save-godown');
+            if (btn && !btn.disabled) btn.click();
+        });
     }
 
     function bindWarehouseStockUpdates() {
         document.querySelectorAll('.warehouse-select').forEach(select => {
             select.addEventListener('change', function () {
                 updateStockBadge(this.closest('tr'));
+                updateWarehouseProgress();
             });
         });
     }
@@ -389,10 +492,23 @@
                 Swal.fire({
                     icon: 'success',
                     title: 'Challan completed',
-                    text: result.message,
-                    timer: 2200,
-                    showConfirmButton: false,
-                }).then(() => window.location.reload());
+                    html: '<p class="mb-2">' + escapeHtml(result.message || 'Stock deducted.') + '</p>' +
+                        '<p class="small text-muted mb-0">Print delivery documents or stay on this page.</p>',
+                    showConfirmButton: true,
+                    confirmButtonText: 'Print challan',
+                    showDenyButton: true,
+                    denyButtonText: 'Print godown',
+                    showCancelButton: true,
+                    cancelButtonText: 'Stay here',
+                }).then((r) => {
+                    const id = invoiceId;
+                    if (r.isConfirmed) {
+                        window.open(BASE_URL + 'challan/challan_copy/' + id, '_blank');
+                    } else if (r.isDenied) {
+                        window.open(BASE_URL + 'challan/godown_copy/' + id, '_blank');
+                    }
+                    window.location.reload();
+                });
             } else {
                 Swal.fire('Error', result.message, 'error');
             }
@@ -462,5 +578,11 @@
         } else if (vals) {
             formData.append('dispatcher_id[]', vals);
         }
+    }
+
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
     }
 })();

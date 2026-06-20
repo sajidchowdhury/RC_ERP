@@ -5,6 +5,7 @@ require_once '../core/BaseController.php';
 require_once '../app/models/WarehouseTransferModel.php';
 require_once '../app/models/WarehouseTransferAuditModel.php';
 require_once '../app/helpers/Helper.php';
+require_once '../app/helpers/InterbranchGlAuditHelper.php';
 
 class WarehouseTransferController extends BaseController {
 
@@ -99,7 +100,7 @@ class WarehouseTransferController extends BaseController {
             'transfer'        => $transfer,
             'items'           => $this->model->getTransferItems((int)$id),
             'movements'       => $this->model->getTransferMovements((int)$id),
-            'journals'        => $this->model->getJournalEntriesForTransfer($transfer),
+            'journal_blocks'  => InterbranchGlAuditHelper::warehouseTransferJournalBlocks($transfer),
             'transfer_audit'  => $audit,
             'can_reverse'     => $this->model->canUserReverseTransfer($transfer),
         ]);

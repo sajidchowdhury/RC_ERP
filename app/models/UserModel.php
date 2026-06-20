@@ -3,6 +3,8 @@
 
 require_once '../core/Database.php';
 require_once __DIR__ . '/../helpers/Helper.php';
+require_once __DIR__ . '/../../core/PasswordPolicy.php';
+require_once __DIR__ . '/../../core/AccountLockout.php';
 
 class UserModel extends Helper{
 
@@ -21,7 +23,7 @@ class UserModel extends Helper{
      */
     public function getUserIndexStats(): array
     {
-        $notDeleted = "(deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')";
+        $notDeleted = "deleted_at IS NULL";
         $stats = [
             'active'   => 0,
             'inactive' => 0,
@@ -55,6 +57,7 @@ class UserModel extends Helper{
         $filterBranch   = $params['filterBranch'] ?? '';
         $filterStatus   = $params['filterStatus'] ?? '';
         $includeDeleted = !empty($params['includeDeleted']);
+        $deletedOnly    = !empty($params['deletedOnly']);
 
         // Columns for ordering (must match the order in the view)
         $columns = [
@@ -74,8 +77,10 @@ class UserModel extends Helper{
         $where = [];
         $bindParams = [];
 
-        if (!$includeDeleted) {
-            $where[] = "(u.deleted_at IS NULL OR u.deleted_at = '0000-00-00 00:00:00')";
+        if ($deletedOnly) {
+            $where[] = 'u.deleted_at IS NOT NULL';
+        } elseif (!$includeDeleted) {
+            $where[] = 'u.deleted_at IS NULL';
         }
 
         // Global search
@@ -101,7 +106,7 @@ class UserModel extends Helper{
         // Total records
         $totalSql = "SELECT COUNT(DISTINCT u.id) as total {$baseQuery}";
         if (!$includeDeleted) {
-            $totalSql .= " WHERE (u.deleted_at IS NULL OR u.deleted_at = '0000-00-00 00:00:00')";
+            $totalSql .= " WHERE u.deleted_at IS NULL";
         }
         $this->db->query($totalSql);
         $totalResult = $this->db->single();
@@ -120,8 +125,9 @@ class UserModel extends Helper{
         $orderBy = $columns[$orderColumn] ?? 'e.name';
         $dataSql = "
             SELECT 
-                u.id, u.username, u.is_active, u.last_login,
-                e.name as employee_name, e.employee_code,
+                u.id, u.username, u.is_active, u.last_login, u.last_login_ip,
+                u.last_login_user_agent, u.deleted_at, u.locked_until, u.failed_login_count,
+                e.id AS employee_id, e.name as employee_name, e.employee_code,
                 b.branch_name
             {$baseQuery}
             {$whereSql}
@@ -150,7 +156,7 @@ class UserModel extends Helper{
 
     // Check if employee already has a user account
     public function employeeHasUser($employee_id) {
-        $this->db->query("SELECT id FROM users WHERE employee_id = :employee_id LIMIT 1");
+        $this->db->query("SELECT id FROM users WHERE employee_id = :employee_id AND deleted_at IS NULL LIMIT 1");
         $this->db->bind(':employee_id', $employee_id);
         return $this->db->single() ? true : false;
     }
@@ -190,6 +196,11 @@ class UserModel extends Helper{
             return ['status' => 'error', 'message' => $validation];
         }
 
+        $createdBy = (int)($_SESSION['user_id'] ?? 0);
+        if ($createdBy <= 0) {
+            return ['status' => 'error', 'message' => 'You must be logged in to create a user.'];
+        }
+
         $this->db->query("
             INSERT INTO users (employee_id, username, password_hash, created_by)
             VALUES (:employee_id, :username, :password_hash, :created_by)
@@ -198,10 +209,14 @@ class UserModel extends Helper{
         $this->db->bind(':employee_id', $data['employee_id']);
         $this->db->bind(':username', trim($data['username']));
         $this->db->bind(':password_hash', password_hash($password, PASSWORD_DEFAULT));
-        $this->db->bind(':created_by', $_SESSION['user_id'] ?? 1);
+        $this->db->bind(':created_by', $createdBy);
 
-        return $this->db->execute() 
-            ? ['status' => 'success', 'message' => 'User created successfully!']
+        return $this->db->execute()
+            ? [
+                'status'  => 'success',
+                'message' => 'User created successfully!',
+                'user_id' => (int)$this->db->lastInsertId(),
+            ]
             : ['status' => 'error', 'message' => 'Failed to create user!'];
     }
 
@@ -211,8 +226,40 @@ class UserModel extends Helper{
             return ['status' => 'error', 'message' => 'Username already exists!'];
         }
 
+        $this->db->query("SELECT is_active, username FROM users WHERE id = :id");
+        $this->db->bind(':id', $id);
+        $current = $this->db->single();
+        if (!$current) {
+            return ['status' => 'error', 'message' => 'User not found!'];
+        }
+
+        $newIsActive = (int)($data['is_active'] ?? 1);
+        $isCurrentlyActive = (bool)$current['is_active'];
+        $usernameChanged = strtolower(trim($data['username'] ?? ''))
+            !== strtolower(trim((string)($current['username'] ?? '')));
+
+        if ($isCurrentlyActive && $newIsActive === 0) {
+            $blockReason = $this->getDeactivationBlockReason((int)$id);
+            if ($blockReason !== null) {
+                return ['status' => 'error', 'message' => $blockReason];
+            }
+        }
+
         $sql = "UPDATE users SET username = :username, is_active = :is_active";
         $password = $data['password'] ?? '';
+
+        if ($this->usersColumnExists('telegram_user_id') && array_key_exists('telegram_user_id', $data)) {
+            $telegramRaw = $data['telegram_user_id'];
+            if ($telegramRaw !== null && trim((string)$telegramRaw) !== '') {
+                $telegramId = $this->normalizeTelegramUserId($telegramRaw);
+                if ($telegramId === null) {
+                    return ['status' => 'error', 'message' => 'Telegram User ID must be a positive numeric chat id.'];
+                }
+                $sql .= ", telegram_user_id = :telegram_user_id";
+            } else {
+                $sql .= ", telegram_user_id = NULL";
+            }
+        }
 
         if (!empty($password)) {
             $sql .= ", password_hash = :password_hash";
@@ -221,8 +268,15 @@ class UserModel extends Helper{
 
         $this->db->query($sql);
         $this->db->bind(':username', trim($data['username']));
-        $this->db->bind(':is_active', $data['is_active'] ?? 1);
+        $this->db->bind(':is_active', $newIsActive);
         $this->db->bind(':id', $id);
+
+        if ($this->usersColumnExists('telegram_user_id') && array_key_exists('telegram_user_id', $data)) {
+            $telegramRaw = $data['telegram_user_id'];
+            if ($telegramRaw !== null && trim((string)$telegramRaw) !== '') {
+                $this->db->bind(':telegram_user_id', $this->normalizeTelegramUserId($telegramRaw), PDO::PARAM_INT);
+            }
+        }
 
         if (!empty($password)) {
             $validation = $this->validatePasswordStrength($password);
@@ -232,9 +286,43 @@ class UserModel extends Helper{
             $this->db->bind(':password_hash', password_hash($password, PASSWORD_DEFAULT));
         }
 
-        return $this->db->execute() 
-            ? ['status' => 'success', 'message' => 'User updated successfully!']
-            : ['status' => 'error', 'message' => 'Failed to update user!'];
+        if (!$this->db->execute()) {
+            return ['status' => 'error', 'message' => 'Failed to update user!'];
+        }
+
+        if (!empty($password)) {
+            require_once __DIR__ . '/../../core/RememberMe.php';
+            RememberMe::revokeAllForUser((int)$id);
+        }
+
+        if (!empty($password) || $usernameChanged) {
+            require_once __DIR__ . '/../../core/CredentialVersion.php';
+            CredentialVersion::bump((int)$id);
+        }
+
+        $this->refreshSessionCredentialIfSelf((int)$id);
+
+        return ['status' => 'success', 'message' => 'User updated successfully!'];
+    }
+
+    private function refreshSessionCredentialIfSelf(int $userId): void
+    {
+        require_once __DIR__ . '/../../core/CredentialVersion.php';
+        CredentialVersion::syncSession($userId);
+
+        if ($userId !== (int)($_SESSION['user_id'] ?? 0)) {
+            return;
+        }
+
+        $this->db->query('SELECT username FROM users WHERE id = :id LIMIT 1');
+        $this->db->bind(':id', $userId);
+        $row = $this->db->single();
+
+        if (!$row) {
+            return;
+        }
+
+        $_SESSION['username'] = (string)($row['username'] ?? $_SESSION['username'] ?? '');
     }
 
     public function toggleStatus($id) {
@@ -251,11 +339,8 @@ class UserModel extends Helper{
 
         // If we are trying to deactivate this user, make sure they are not the last active user
         if ($isCurrentlyActive) {
-            $this->db->query("SELECT COUNT(*) as active_count FROM users WHERE is_active = 1 AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')");
-            $count = $this->db->single();
-
-            if ($count && (int)$count['active_count'] <= 1) {
-                // This is the last active user — do not allow deactivation
+            $blockReason = $this->getDeactivationBlockReason((int)$id);
+            if ($blockReason !== null) {
                 return false;
             }
         }
@@ -270,12 +355,18 @@ class UserModel extends Helper{
      */
     public function softDeleteUser(int $id, int $deletedBy): bool
     {
-        // Prevent soft deleting the last active user
-        $this->db->query("SELECT COUNT(*) as active_count FROM users WHERE is_active = 1 AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')");
-        $count = $this->db->single();
+        $this->db->query("SELECT is_active FROM users WHERE id = :id");
+        $this->db->bind(':id', $id);
+        $current = $this->db->single();
+        if (!$current) {
+            return false;
+        }
 
-        if ($count && (int)$count['active_count'] <= 1) {
-            return false; // Cannot delete the last active user
+        if ((bool)$current['is_active']) {
+            $blockReason = $this->getDeactivationBlockReason($id);
+            if ($blockReason !== null) {
+                return false;
+            }
         }
 
         $this->db->query("
@@ -292,19 +383,86 @@ class UserModel extends Helper{
     }
 
     /**
-     * Restore a soft-deleted user
+     * Restore a soft-deleted user.
      */
-    public function restoreUser(int $id): bool
+    public function restoreUser(int $id): array
     {
-        $this->db->query("
+        $this->db->query('SELECT id, deleted_at FROM users WHERE id = :id LIMIT 1');
+        $this->db->bind(':id', $id);
+        $user = $this->db->single();
+
+        if (!$user) {
+            return ['status' => 'error', 'message' => 'User not found.'];
+        }
+
+        if ($user['deleted_at'] === null || $user['deleted_at'] === '') {
+            return ['status' => 'error', 'message' => 'This user is not deleted.'];
+        }
+
+        $this->db->query('
             UPDATE users 
             SET deleted_at = NULL, 
                 deleted_by = NULL,
                 is_active = 1
             WHERE id = :id
-        ");
+        ');
         $this->db->bind(':id', $id);
-        return $this->db->execute();
+
+        return $this->db->execute()
+            ? ['status' => 'success', 'message' => 'User restored successfully.']
+            : ['status' => 'error', 'message' => 'Failed to restore user.'];
+    }
+
+    public function unlockUser(int $id): array
+    {
+        if (!AccountLockout::unlock($id)) {
+            return ['status' => 'error', 'message' => 'Failed to unlock account.'];
+        }
+
+        return ['status' => 'success', 'message' => 'Account lockout cleared.'];
+    }
+
+    /**
+     * Login summary for the unified employee + account hub.
+     */
+    public function getUserAccountSummaryByEmployeeId(int $employeeId): ?array
+    {
+        $this->db->query('
+            SELECT u.id, u.username, u.is_active, u.last_login, u.last_login_ip,
+                   u.totp_enabled, u.locked_until, u.failed_login_count, u.deleted_at,
+                   u.employee_id
+            FROM users u
+            WHERE u.employee_id = :employee_id AND u.deleted_at IS NULL
+            ORDER BY u.id DESC
+            LIMIT 1
+        ');
+        $this->db->bind(':employee_id', $employeeId);
+        $row = $this->db->single();
+
+        return $row ?: null;
+    }
+
+    /**
+     * Menu permission counts for hub summary chips.
+     */
+    public function getPermissionStats(int $userId): array
+    {
+        $this->db->query('
+            SELECT
+                COALESCE(SUM(CASE WHEN can_view = 1 THEN 1 ELSE 0 END), 0) AS view_count,
+                COALESCE(SUM(CASE WHEN can_edit = 1 THEN 1 ELSE 0 END), 0) AS edit_count,
+                COUNT(*) AS menu_count
+            FROM user_menu_permissions
+            WHERE user_id = :user_id
+        ');
+        $this->db->bind(':user_id', $userId);
+        $row = $this->db->single() ?: [];
+
+        return [
+            'view_count'  => (int)($row['view_count'] ?? 0),
+            'edit_count'  => (int)($row['edit_count'] ?? 0),
+            'menu_count'  => (int)($row['menu_count'] ?? 0),
+        ];
     }
 
     // Get current permissions for a user
@@ -325,6 +483,25 @@ class UserModel extends Helper{
             ];
         }
         return $permissions;
+    }
+
+    /**
+     * Active users available as a permission copy source (excludes target).
+     */
+    public function getUsersForPermissionCopy(int $excludeUserId): array
+    {
+        $this->db->query('
+            SELECT u.id, u.username, e.name AS employee_name, e.employee_code
+            FROM users u
+            JOIN employees e ON e.id = u.employee_id
+            WHERE u.deleted_at IS NULL
+              AND u.is_active = 1
+              AND u.id != :exclude
+            ORDER BY e.name ASC, u.username ASC
+        ');
+        $this->db->bind(':exclude', $excludeUserId);
+
+        return $this->db->resultSet();
     }
 
     // Save single permission
@@ -419,29 +596,43 @@ class UserModel extends Helper{
     }
 
     /**
+     * Count non-deleted active users.
+     */
+    private function countActiveUsers(): int
+    {
+        $this->db->query("
+            SELECT COUNT(*) AS active_count
+            FROM users
+            WHERE is_active = 1
+              AND deleted_at IS NULL
+        ");
+        $count = $this->db->single();
+        return (int)($count['active_count'] ?? 0);
+    }
+
+    /**
+     * Return an error message when deactivation must be blocked, or null when allowed.
+     */
+    private function getDeactivationBlockReason(int $userId): ?string
+    {
+        if ($userId === (int)($_SESSION['user_id'] ?? 0)) {
+            return 'You cannot deactivate your own account while logged in.';
+        }
+
+        if ($this->countActiveUsers() <= 1) {
+            return 'Cannot deactivate this user. This is the last active user in the system.';
+        }
+
+        return null;
+    }
+
+    /**
      * Professional password strength policy
      * Returns true on success, or error message string on failure.
      */
     private function validatePasswordStrength(string $password): true|string
     {
-        if (strlen($password) < 8) {
-            return 'Password must be at least 8 characters long.';
-        }
-
-        if (!preg_match('/[A-Za-z]/', $password)) {
-            return 'Password must contain at least one letter.';
-        }
-
-        if (!preg_match('/[0-9]/', $password)) {
-            return 'Password must contain at least one number.';
-        }
-
-        // Optional stronger rule (uncomment if desired):
-        // if (!preg_match('/[^A-Za-z0-9]/', $password)) {
-        //     return 'Password must contain at least one special character.';
-        // }
-
-        return true;
+        return PasswordPolicy::validate($password);
     }
 
     /**
@@ -473,9 +664,100 @@ class UserModel extends Helper{
         $this->db->bind(':id', $userId);
 
         if ($this->db->execute()) {
+            require_once __DIR__ . '/../../core/RememberMe.php';
+            RememberMe::revokeAllForUser($userId);
+            require_once __DIR__ . '/../../core/CredentialVersion.php';
+            CredentialVersion::bump($userId);
+            $this->refreshSessionCredentialIfSelf($userId);
             return ['status' => 'success', 'message' => 'Password changed successfully!'];
         }
 
         return ['status' => 'error', 'message' => 'Failed to update password.'];
+    }
+
+    public function usersColumnExists(string $column): bool
+    {
+        static $cache = [];
+        if (array_key_exists($column, $cache)) {
+            return $cache[$column];
+        }
+
+        $this->db->query("
+            SELECT COUNT(*) AS c
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'users'
+              AND COLUMN_NAME = :col
+        ");
+        $this->db->bind(':col', $column);
+        $cache[$column] = ((int)($this->db->single()['c'] ?? 0)) > 0;
+
+        return $cache[$column];
+    }
+
+    /**
+     * @param mixed $value
+     */
+    public function normalizeTelegramUserId($value): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $raw = preg_replace('/\s+/', '', (string)$value);
+        if ($raw === '' || !ctype_digit($raw)) {
+            return null;
+        }
+
+        $id = (int)$raw;
+
+        return $id > 0 ? $id : null;
+    }
+
+    /**
+     * Save Telegram chat id for alerts (self-service or admin).
+     *
+     * @param mixed $telegramUserId
+     */
+    public function updateTelegramUserId(int $userId, $telegramUserId): array
+    {
+        if ($userId <= 0) {
+            return ['status' => 'error', 'message' => 'Invalid user.'];
+        }
+
+        if (!$this->usersColumnExists('telegram_user_id')) {
+            return [
+                'status'  => 'error',
+                'message' => 'Telegram alerts are not available yet. Ask admin to run migration 043_users_telegram_user_id.sql.',
+            ];
+        }
+
+        $normalized = null;
+        if ($telegramUserId !== null && trim((string)$telegramUserId) !== '') {
+            $normalized = $this->normalizeTelegramUserId($telegramUserId);
+            if ($normalized === null) {
+                return ['status' => 'error', 'message' => 'Telegram User ID must be a positive number (from @userinfobot).'];
+            }
+        }
+
+        $this->db->query('UPDATE users SET telegram_user_id = :tid WHERE id = :id');
+        if ($normalized === null) {
+            $this->db->bind(':tid', null, PDO::PARAM_NULL);
+        } else {
+            $this->db->bind(':tid', $normalized, PDO::PARAM_INT);
+        }
+        $this->db->bind(':id', $userId, PDO::PARAM_INT);
+
+        if (!$this->db->execute()) {
+            return ['status' => 'error', 'message' => 'Could not save Telegram User ID.'];
+        }
+
+        return [
+            'status'           => 'success',
+            'message'          => $normalized === null
+                ? 'Telegram alerts disabled for your account.'
+                : 'Telegram User ID saved. You will receive bot alerts in your personal chat.',
+            'telegram_user_id' => $normalized,
+        ];
     }
 }

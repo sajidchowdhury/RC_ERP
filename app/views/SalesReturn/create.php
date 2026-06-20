@@ -10,8 +10,19 @@ ob_start();
 <div id="sr-create-page" class="sr-create-app container-fluid py-2">
     <header class="sr-create-hero">
         <div>
-            <h1><i class="fas fa-box-open me-2"></i>Receive return</h1>
-            <p>Search once, enter quantities, save — warehouse confirms later</p>
+            <h1><i class="fas fa-box-open me-2"></i>Step 1 — Receive from customer</h1>
+            <p>Record what the customer is returning. Stock and credit apply after warehouse confirms (Step 2).</p>
+            <div class="sr-journey-steps sr-journey-steps--hero" aria-label="Return process">
+                <div class="sr-journey-step is-active">
+                    <span class="sr-journey-num">1</span>
+                    <span class="sr-journey-label">Receive from customer</span>
+                </div>
+                <span class="sr-journey-arrow" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
+                <div class="sr-journey-step is-muted">
+                    <span class="sr-journey-num">2</span>
+                    <span class="sr-journey-label">Warehouse confirm</span>
+                </div>
+            </div>
             <span class="sales-return-branch-tag"><i class="fas fa-map-marker-alt me-1"></i><?= htmlspecialchars($branchName, ENT_QUOTES) ?></span>
         </div>
         <a href="<?= BASE_URL ?>SalesReturn" class="btn btn-light btn-sm flex-shrink-0">

@@ -17,6 +17,17 @@ if (session_status() === PHP_SESSION_NONE) {
     
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/custom.css">
     <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/footer-dropup.css">
+    <?php
+    $routeControllerForNav = $GLOBALS['__erp_route_controller'] ?? '';
+    $navCssFile = __DIR__ . '/../../helpers/AccountingNavHelper.php';
+    if (is_readable($navCssFile)) {
+        require_once $navCssFile;
+        if (AccountingNavHelper::isAccountingController($routeControllerForNav)) {
+            echo '<link rel="stylesheet" href="' . BASE_URL . 'assets/css/accounting-nav.css">' . "\n";
+            echo '<link rel="stylesheet" href="' . BASE_URL . 'assets/css/accounting-mobile.css">' . "\n";
+        }
+    }
+    ?>
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -39,6 +50,31 @@ if (session_status() === PHP_SESSION_NONE) {
             <?php include 'sidebar.php'; ?>
 
             <main class="col-md-11 ms-sm-auto col-lg-10 px-3 px-md-4 py-2" id="mainContent">
+                <?php
+                $period_banner = null;
+                if (class_exists('Auth', false) && Auth::isLoggedIn()) {
+                    $routeController = $GLOBALS['__erp_route_controller'] ?? '';
+                    $periodHelperFile = __DIR__ . '/../../helpers/AccountingModuleHelper.php';
+                    if (is_readable($periodHelperFile)) {
+                        require_once $periodHelperFile;
+                        if (AccountingModuleHelper::shouldShowPeriodBanner($routeController)) {
+                            $period_banner = AccountingModuleHelper::periodBannerForSession();
+                            include __DIR__ . '/../partials/accounting_period_banner.php';
+                        }
+                    }
+                }
+                ?>
+                <?php
+                $routeController = $GLOBALS['__erp_route_controller'] ?? '';
+                $routeAction = $GLOBALS['__erp_route_action'] ?? '';
+                $navHelperFile = __DIR__ . '/../../helpers/AccountingNavHelper.php';
+                if (is_readable($navHelperFile)) {
+                    require_once $navHelperFile;
+                    if (AccountingNavHelper::isAccountingController($routeController)) {
+                        include __DIR__ . '/../partials/accounting_breadcrumb.php';
+                    }
+                }
+                ?>
                 <?= $content ?? '<h2>Content not loaded</h2>' ?>
             </main>
         </div>
@@ -78,6 +114,8 @@ if (session_status() === PHP_SESSION_NONE) {
     </script>
     <script type="module" src="<?= BASE_URL ?>assets/js/notification.js"></script>
     <?php endif; ?>
+
+    <?php include __DIR__ . '/_flash.php'; ?>
 
   
 

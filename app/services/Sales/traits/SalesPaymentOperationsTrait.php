@@ -168,12 +168,17 @@ trait SalesPaymentOperationsTrait
 
             $this->db->commit();
 
+            $receipt = $invoice_id > 0 ? $this->getPaymentReceiptData($invoice_id) : null;
+
             return [
                 'status' => 'success',
                 'message' => 'Payment recorded successfully!',
                 'payment_id' => $payment_id,
                 'payment_code' => $payment_code,
                 'journal_entry_id' => $journalResult['journal_entry_id'] ?? null,
+                'invoice_id' => $invoice_id,
+                'balance_due' => (float)($receipt['balance_due'] ?? 0),
+                'is_fully_paid' => !empty($receipt['is_fully_paid']),
             ];
 
         } catch (Exception $e) {

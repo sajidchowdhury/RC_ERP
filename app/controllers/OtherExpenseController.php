@@ -4,6 +4,7 @@
 require_once '../core/BaseController.php';
 require_once '../app/models/OtherExpenseModel.php';
 require_once '../app/helpers/Helper.php';
+require_once '../app/helpers/AccountingModuleHelper.php';
 require_once '../core/UserAudit.php';
 
 class OtherExpenseController extends BaseController {
@@ -46,11 +47,12 @@ class OtherExpenseController extends BaseController {
 
     public function create() {
         $this->view('Accounting/OtherExpense/create', [
-            'title'       => 'Record Other Expense',
-            'ledgers'     => $this->model->getExpenseLedgers(),
-            'banks'       => $this->model->getBanks(),
-            'today'       => date('Y-m-d'),
-            'branch_name' => $_SESSION['branch_name'] ?? 'Branch',
+            'title'            => 'Record Other Expense',
+            'ledgers'          => $this->model->getExpenseLedgers(),
+            'banks'            => $this->model->getBanks(),
+            'today'            => date('Y-m-d'),
+            'branch_name'      => $_SESSION['branch_name'] ?? 'Branch',
+            'min_posting_date' => AccountingModuleHelper::minPostingDateForSession(),
         ]);
     }
 

@@ -160,10 +160,10 @@ class StockTakeModel extends Helper {
                 COALESCE(ws.qty, 0) AS system_qty,
                 COALESCE(ws.avg_cost, 0) AS avg_cost,
                 (
-                    SELECT ph.sales_rate
+                    SELECT ph.default_rate
                     FROM product_price_history ph
                     WHERE ph.product_id = p.id
-                    ORDER BY ph.effective_from DESC, ph.id DESC
+                    ORDER BY ph.effective_from DESC, ph.created_at DESC, ph.id DESC
                     LIMIT 1
                 ) AS receipt_price
             FROM products p

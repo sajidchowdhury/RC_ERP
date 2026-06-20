@@ -58,6 +58,16 @@ trait SalesInvoiceOperationsTrait
             ];
         }
 
+        $rateErrors = $this->validateCartRatesInRange($items);
+        if ($rateErrors !== []) {
+            return [
+                'status'       => 'error',
+                'code'         => 'price_out_of_range',
+                'message'      => implode(' ', $rateErrors),
+                'rate_errors'  => $rateErrors,
+            ];
+        }
+
         $qtyByProduct = [];
         foreach ($items as $item) {
             $pid = (int)($item['product_id'] ?? 0);
@@ -75,7 +85,6 @@ trait SalesInvoiceOperationsTrait
                 throw new Exception('Insufficient stock: ' . implode('; ', $stockErrors));
             }
 
-            $defaultWarehouseId = $stock->getDefaultWarehouseId((int)$branch_id);
             $invoice_code = $this->generateSalesInvoiceCode($branch_id);
 
             // 1. Create Sales Invoice
@@ -104,33 +113,31 @@ trait SalesInvoiceOperationsTrait
             $this->db->execute();
             $invoice_id = $this->db->lastInsertId();
 
-  // === 2. Create Invoice Items ===
+  // === 2. Create Invoice Items (warehouse assigned at godown) ===
 foreach ($items as $item) {
     $this->db->query("
         INSERT INTO sales_invoice_items 
         (sales_invoice_id, product_id, warehouse_id, qty, rate)
-        VALUES (:invoice_id, :product_id, :wid, :qty, :rate)
+        VALUES (:invoice_id, :product_id, NULL, :qty, :rate)
     ");
     $this->db->bind(':invoice_id', $invoice_id);
     $this->db->bind(':product_id', $item['product_id']);
-    $this->db->bind(':wid', $defaultWarehouseId);
     $this->db->bind(':qty', $item['qty']);
     $this->db->bind(':rate', $item['rate']);
     $this->db->execute();
 }
 
-// === 3. Create Soft Reservation in dispatches ===
+// === 3. Branch-level soft reservation (warehouse picked at godown) ===
 foreach ($items as $item) {
     $this->db->query("
         INSERT INTO sales_invoice_dispatches 
         (sales_invoice_id, product_id, ordered_qty, dispatched_qty, 
          warehouse_id, created_by)
-        VALUES (:inv_id, :pid, :oqty, 0, :wid, :uid)
+        VALUES (:inv_id, :pid, :oqty, 0, NULL, :uid)
     ");
     $this->db->bind(':inv_id', $invoice_id);
     $this->db->bind(':pid', $item['product_id']);
     $this->db->bind(':oqty', $item['qty']);
-    $this->db->bind(':wid', $defaultWarehouseId);
     $this->db->bind(':uid', $_SESSION['user_id'] ?? 1);
     $this->db->execute();
 }
@@ -323,6 +330,16 @@ foreach ($items as $item) {
                 ];
             }
 
+            $rateErrors = $this->validateCartRatesInRange($items);
+            if ($rateErrors !== []) {
+                return [
+                    'status'       => 'error',
+                    'code'         => 'price_out_of_range',
+                    'message'      => implode(' ', $rateErrors),
+                    'rate_errors'  => $rateErrors,
+                ];
+            }
+
         $qtyByProduct = [];
         foreach ($items as $item) {
             $pid = (int)($item['product_id'] ?? 0);
@@ -344,7 +361,6 @@ foreach ($items as $item) {
             if ($stockErrors !== []) {
                 throw new Exception('Insufficient stock: ' . implode('; ', $stockErrors));
             }
-            $defaultWarehouseId = $stock->getDefaultWarehouseId($branch_id);
 
             // 3. Reverse old ledger entry (credit the old amount)
             $this->db->query("SELECT running_balance FROM customer_ledger 
@@ -414,11 +430,10 @@ foreach ($items as $item) {
             foreach ($items as $item) {
                 $this->db->query("INSERT INTO sales_invoice_items 
                     (sales_invoice_id, product_id, warehouse_id, qty, rate) 
-                    VALUES (:invoice_id, :product_id, :wid, :qty, :rate)");
+                    VALUES (:invoice_id, :product_id, NULL, :qty, :rate)");
 
                 $this->db->bind(':invoice_id', $invoice_id);
                 $this->db->bind(':product_id', $item['product_id']);
-                $this->db->bind(':wid', $defaultWarehouseId);
                 $this->db->bind(':qty', $item['qty']);
                 $this->db->bind(':rate', $item['rate']);
                 $this->db->execute();
@@ -434,18 +449,17 @@ foreach ($items as $item) {
             $this->db->bind(':id', $invoice_id);
             $this->db->execute();
 
-// Re-insert fresh soft reservations
+// Re-insert branch-level soft reservations (warehouse assigned at godown)
 foreach ($items as $item) {
     $this->db->query("
         INSERT INTO sales_invoice_dispatches 
         (sales_invoice_id, product_id, ordered_qty, dispatched_qty, 
          warehouse_id, created_by)
-        VALUES (:inv_id, :pid, :oqty, 0, :wid, :uid)
+        VALUES (:inv_id, :pid, :oqty, 0, NULL, :uid)
     ");
     $this->db->bind(':inv_id', $invoice_id);
     $this->db->bind(':pid', $item['product_id']);
     $this->db->bind(':oqty', $item['qty']);
-    $this->db->bind(':wid', $defaultWarehouseId);
     $this->db->bind(':uid', $_SESSION['user_id'] ?? 1);
     $this->db->execute();
 }
@@ -583,25 +597,41 @@ foreach ($items as $item) {
 
         $this->db->beginTransaction();
         try {
+            $updated = 0;
             foreach ($invoice_ids as $id) {
+                $id = (int)$id;
+                if ($id <= 0) {
+                    continue;
+                }
+
                 $this->db->query("
                     UPDATE sales_invoices 
                     SET call_a_day = 1 
                     WHERE id = :id 
                       AND branch_id = :branch_id 
                       AND is_reversed = 0
+                      AND COALESCE(call_a_day, 0) = 0
                 ");
 
-                $this->db->bind(':id', (int)$id);
+                $this->db->bind(':id', $id);
                 $this->db->bind(':branch_id', (int)$branch_id);
                 $this->db->execute();
+                $updated += $this->db->rowCount();
             }
 
             $this->db->commit();
 
+            if ($updated === 0) {
+                return [
+                    'status'  => 'error',
+                    'message' => 'No invoices were removed from the list (already cleared or not found).',
+                ];
+            }
+
             return [
                 'status'  => 'success',
-                'message' => count($invoice_ids) . ' invoice(s) have been moved out of Today list.'
+                'message' => $updated . ' invoice(s) removed from your daily collection list.',
+                'updated' => $updated,
             ];
 
         } catch (Exception $e) {
@@ -612,7 +642,7 @@ foreach ($items as $item) {
      }
 
 
-    public function deleteInvoice($invoice_id) { 
+    public function deleteInvoice($invoice_id, ?string $deleteReason = null) { 
 
     
         $this->db->beginTransaction();
@@ -716,15 +746,20 @@ foreach ($items as $item) {
             $this->db->bind(':id', $invoice_id);
             $this->db->execute();
 
+            $reverseReason = ($deleteReason !== null && trim($deleteReason) !== '')
+                ? trim($deleteReason)
+                : 'Deleted by user';
+
             // 5. Delete the invoice itself (soft delete using is_reversed)
             $this->db->query("UPDATE sales_invoices 
                               SET is_reversed = 1, 
                                   reversed_at = NOW(), 
                                   reversed_by = :reversed_by,
-                                  reverse_reason = 'Deleted by user'
+                                  reverse_reason = :reverse_reason
                               WHERE id = :id");
             $this->db->bind(':id', $invoice_id);
             $this->db->bind(':reversed_by', $_SESSION['user_id'] ?? 1);
+            $this->db->bind(':reverse_reason', $reverseReason);
             $this->db->execute();
 
             // 6. Remove soft dispatch reservations (invoice is reversed)
@@ -749,6 +784,17 @@ foreach ($items as $item) {
 
      }
 
+    private function invoicePaidAmountSql(): string
+    {
+        return "COALESCE((
+            SELECT SUM(ipa.allocated_amount)
+            FROM invoice_payment_allocations ipa
+            INNER JOIN customer_payments cp ON cp.id = ipa.payment_id
+            WHERE ipa.invoice_id = si.id
+              AND COALESCE(cp.is_reversed, 0) = 0
+        ), 0)";
+    }
+
     private const TODAY_INVOICE_FROM = "
         FROM sales_invoices si
         JOIN customers c ON si.customer_id = c.id
@@ -757,7 +803,11 @@ foreach ($items as $item) {
         LEFT JOIN users u ON u.id = si.created_by
     ";
 
-    private const TODAY_INVOICE_SELECT = "
+    private function todayInvoiceSelectSql(): string
+    {
+        $paid = $this->invoicePaidAmountSql();
+
+        return "
         SELECT
             si.id,
             si.invoice_code,
@@ -771,8 +821,12 @@ foreach ($items as $item) {
             c.mobile,
             c.address,
             b.branch_name,
-            e.name AS salesman_name
-    ";
+            e.name AS salesman_name,
+            {$paid} AS paid_amount,
+            GREATEST(0, si.total_amount - {$paid}) AS balance_due,
+            DATEDIFF(CURDATE(), si.invoice_date) AS age_days
+        ";
+    }
 
     private function buildTodayInvoiceWhere(array $filters, array &$bindings, ?string $dataTablesSearch = null): array
     {
@@ -851,6 +905,10 @@ foreach ($items as $item) {
             case 'challan_generated':
                 $where[] = "si.status = 'challan_completed'";
                 return;
+            case 'awaiting_payment':
+                $paid = $this->invoicePaidAmountSql();
+                $where[] = "(si.total_amount - {$paid}) > 0.009";
+                return;
         }
     }
 
@@ -886,6 +944,7 @@ foreach ($items as $item) {
         $draft = 0;
         $godown = 0;
         $done = 0;
+        $awaitingPayment = 0;
         $total = 0;
         foreach ($rows as $row) {
             $cnt = (int)($row['cnt'] ?? 0);
@@ -903,12 +962,28 @@ foreach ($items as $item) {
             }
         }
 
+        $paidSql = $this->invoicePaidAmountSql();
+        $awaitBindings = $bindings;
+        $awaitWhere = $this->buildTodayInvoiceWhere(
+            $summaryFilters,
+            $awaitBindings,
+            $search !== '' ? $search : null
+        );
+        $awaitWhere[] = "(si.total_amount - {$paidSql}) > 0.009";
+        $awaitWhereSql = ' WHERE ' . implode(' AND ', $awaitWhere);
+        $this->db->query('SELECT COUNT(*) AS c ' . self::TODAY_INVOICE_FROM . $awaitWhereSql);
+        foreach ($awaitBindings as $param => $value) {
+            $this->db->bind($param, $value);
+        }
+        $awaitingPayment = (int)($this->db->single()['c'] ?? 0);
+
         return [
             'total'             => $total,
             'pending'           => $draft,
             'godown_copy'       => $godown,
             'challan_generated' => $done,
             'open_pipeline'     => $draft + $godown,
+            'awaiting_payment'  => $awaitingPayment,
         ];
     }
 
@@ -931,7 +1006,7 @@ foreach ($items as $item) {
     {
         $bindings = [];
         $where = $this->buildTodayInvoiceWhere($filters, $bindings, null);
-        $sql = self::TODAY_INVOICE_SELECT . self::TODAY_INVOICE_FROM;
+        $sql = $this->todayInvoiceSelectSql() . self::TODAY_INVOICE_FROM;
         if (!empty($where)) {
             $sql .= ' WHERE ' . implode(' AND ', $where);
         }
@@ -955,12 +1030,11 @@ foreach ($items as $item) {
         string $searchValue = ''
     ): array {
         if (!empty($filters['smart_sort'])) {
-            $orderBy = "CASE si.status
-                WHEN 'draft' THEN 1
-                WHEN 'godown_issued' THEN 2
-                WHEN 'challan_completed' THEN 3
-                ELSE 4 END, si.created_at";
-            $orderDir = 'DESC';
+            $paid = $this->invoicePaidAmountSql();
+            $orderBy = "CASE WHEN (si.total_amount - {$paid}) > 0.009 THEN 0 ELSE 1 END,
+                si.invoice_date ASC,
+                si.created_at DESC";
+            $orderDir = '';
         } else {
             $orderMap = [
                 1 => 'si.invoice_code',
@@ -969,9 +1043,11 @@ foreach ($items as $item) {
                 4 => 'b.branch_name',
                 5 => 'e.name',
                 6 => 'si.total_amount',
-                7 => 'si.status',
+                7 => 'paid_amount',
+                8 => 'balance_due',
+                9 => 'si.status',
             ];
-            $orderBy = $orderMap[$orderColumnIndex] ?? 'si.created_at';
+            $orderBy = $orderMap[$orderColumnIndex] ?? 'si.invoice_date';
             $orderDir = strtoupper($orderDir) === 'ASC' ? 'ASC' : 'DESC';
         }
 
@@ -989,8 +1065,12 @@ foreach ($items as $item) {
         }
         $recordsFiltered = (int)($this->db->single()['cnt'] ?? 0);
 
-        $sql = self::TODAY_INVOICE_SELECT . self::TODAY_INVOICE_FROM . $countWhereSql
-            . " ORDER BY {$orderBy} {$orderDir} LIMIT :start, :length";
+        $orderClause = $orderDir !== ''
+            ? " ORDER BY {$orderBy} {$orderDir}"
+            : " ORDER BY {$orderBy}";
+
+        $sql = $this->todayInvoiceSelectSql() . self::TODAY_INVOICE_FROM . $countWhereSql
+            . $orderClause . " LIMIT :start, :length";
         $this->db->query($sql);
         foreach ($countBindings as $param => $value) {
             $this->db->bind($param, $value);
@@ -1006,10 +1086,109 @@ foreach ($items as $item) {
         ];
     }
 
-    public function cancelStaleDraftInvoices(?int $maxDays = null, ?int $branchId = null): array
+    protected function getStaleDraftThresholdDays(?int $maxDays = null): int
     {
         $days = $maxDays ?? (defined('SALES_STALE_DRAFT_DAYS') ? (int)SALES_STALE_DRAFT_DAYS : 14);
-        $days = max(1, $days);
+
+        return max(1, $days);
+    }
+
+    public function countStaleDraftInvoices(?int $maxDays = null, ?int $branchId = null): int
+    {
+        $days = $this->getStaleDraftThresholdDays($maxDays);
+        $branchSql = '';
+        if ($branchId !== null && $branchId > 0) {
+            $branchSql = ' AND si.branch_id = ' . (int)$branchId;
+        }
+
+        $this->db->query("
+            SELECT COUNT(*) AS c
+            FROM sales_invoices si
+            WHERE si.status = 'draft'
+              AND COALESCE(si.is_reversed, 0) = 0
+              AND si.godown_issued_at IS NULL
+              AND si.created_at < DATE_SUB(NOW(), INTERVAL :days DAY)
+              {$branchSql}
+        ");
+        $this->db->bind(':days', $days);
+
+        return (int)($this->db->single()['c'] ?? 0);
+    }
+
+    /**
+     * @return list<array{id:int, invoice_code:string, created_at:string, total_amount:float}>
+     */
+    public function listStaleDraftInvoices(?int $maxDays = null, ?int $branchId = null, int $limit = 5): array
+    {
+        $days = $this->getStaleDraftThresholdDays($maxDays);
+        $limit = max(1, min(20, $limit));
+        $branchSql = '';
+        if ($branchId !== null && $branchId > 0) {
+            $branchSql = ' AND si.branch_id = ' . (int)$branchId;
+        }
+
+        $this->db->query("
+            SELECT si.id, si.invoice_code, si.created_at, si.total_amount
+            FROM sales_invoices si
+            WHERE si.status = 'draft'
+              AND COALESCE(si.is_reversed, 0) = 0
+              AND si.godown_issued_at IS NULL
+              AND si.created_at < DATE_SUB(NOW(), INTERVAL :days DAY)
+              {$branchSql}
+            ORDER BY si.created_at ASC
+            LIMIT {$limit}
+        ");
+        $this->db->bind(':days', $days);
+        $rows = $this->db->resultSet() ?: [];
+
+        return array_map(static function (array $row): array {
+            return [
+                'id'           => (int)($row['id'] ?? 0),
+                'invoice_code' => (string)($row['invoice_code'] ?? ''),
+                'created_at'   => (string)($row['created_at'] ?? ''),
+                'total_amount' => (float)($row['total_amount'] ?? 0),
+            ];
+        }, $rows);
+    }
+
+    /**
+     * Auto-cancel stale drafts at most once per branch every 6 hours (when enabled in config).
+     */
+    public function runStaleDraftCleanupIfDue(?int $branchId = null, bool $force = false): array
+    {
+        if (!defined('SALES_STALE_DRAFT_AUTO_CANCEL') || !SALES_STALE_DRAFT_AUTO_CANCEL) {
+            return [
+                'status'    => 'skipped',
+                'reason'    => 'auto_cancel_disabled',
+                'cancelled' => 0,
+                'days'      => $this->getStaleDraftThresholdDays(),
+            ];
+        }
+
+        $branchId = ($branchId !== null && $branchId > 0) ? $branchId : null;
+        $sessionKey = 'sales_stale_cleanup_at_' . ($branchId ?? 'all');
+        $now = time();
+        if (
+            !$force
+            && !empty($_SESSION[$sessionKey])
+            && ($now - (int)$_SESSION[$sessionKey]) < 21600
+        ) {
+            return [
+                'status'    => 'skipped',
+                'reason'    => 'throttled',
+                'cancelled' => 0,
+                'days'      => $this->getStaleDraftThresholdDays(),
+            ];
+        }
+
+        $_SESSION[$sessionKey] = $now;
+
+        return $this->cancelStaleDraftInvoices(null, $branchId);
+    }
+
+    public function cancelStaleDraftInvoices(?int $maxDays = null, ?int $branchId = null): array
+    {
+        $days = $this->getStaleDraftThresholdDays($maxDays);
 
         $branchSql = '';
         if ($branchId !== null && $branchId > 0) {
@@ -1017,7 +1196,7 @@ foreach ($items as $item) {
         }
 
         $this->db->query("
-            SELECT si.id
+            SELECT si.id, si.invoice_code
             FROM sales_invoices si
             WHERE si.status = 'draft'
               AND COALESCE(si.is_reversed, 0) = 0
@@ -1032,16 +1211,18 @@ foreach ($items as $item) {
 
         $cancelled = 0;
         $errors = [];
+        $cancelReason = sprintf('Stale draft auto-cancel (>%d days)', $days);
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
             if ($id <= 0) {
                 continue;
             }
-            $result = $this->deleteInvoice($id);
+            $result = $this->deleteInvoice($id, $cancelReason);
             if (($result['status'] ?? '') === 'success') {
                 $cancelled++;
             } else {
-                $errors[] = "Invoice #{$id}: " . ($result['message'] ?? 'failed');
+                $code = (string)($row['invoice_code'] ?? $id);
+                $errors[] = "{$code}: " . ($result['message'] ?? 'failed');
             }
         }
 

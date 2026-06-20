@@ -409,7 +409,12 @@ class ChallanModel extends SalesModel {
                 $this->db->query("SELECT avg_cost FROM warehouse_stock WHERE product_id = :pid AND warehouse_id = :wid");
                 $this->db->bind(':pid', $pid);
                 $this->db->bind(':wid', $wid);
-                $avg_cost = (float)($this->db->single()['avg_cost'] ?? 0);
+                $avg_cost = round((float)($this->db->single()['avg_cost'] ?? 0), 4);
+                if ($avg_cost <= 0) {
+                    throw new Exception(
+                        'Cannot complete challan: zero cost for product #' . $pid . ' in warehouse #' . $wid . '. Receive stock or set cost first.'
+                    );
+                }
 
                 $this->db->query("
                     UPDATE sales_invoice_dispatches
@@ -451,6 +456,8 @@ class ChallanModel extends SalesModel {
                     'remarks'        => 'Sales Challan #' . $challan_code,
                 ]);
 
+                $this->saveChallanIssueLine($challan_id, $pid, $wid, $qty, $avg_cost);
+
                 $cogsTotal += $qty * $avg_cost;
             }
 
@@ -463,6 +470,8 @@ class ChallanModel extends SalesModel {
                     'customer_id'  => $customerId,
                     'branch_id'    => $invoiceBranchId,
                     'entry_date'   => date('Y-m-d'),
+                    'challan_code' => $challan_code,
+                    'challan_id'   => (int)$challan_id,
                 ]);
                 if (($adjResult['status'] ?? '') === 'error') {
                     throw new Exception('Transport/total GL adjustment failed: ' . ($adjResult['message'] ?? ''));
@@ -571,12 +580,22 @@ class ChallanModel extends SalesModel {
                 );
             }
 
+            $ledgerAdjustment = $this->sumChallanInvoiceAdjustments(
+                (int)$invoice['customer_id'],
+                $invoiceId,
+                $challanCode
+            );
+            if (abs($ledgerAdjustment) > 0.0001) {
+                $transportAdjustment = $ledgerAdjustment;
+            }
+
             $itemsReversed = $this->restoreStockFromChallanIssue(
                 $challanId,
                 $challanCode,
                 $invoiceId,
                 (int)$invoice['branch_id'],
-                $reason
+                $reason,
+                (int)($challan['journal_entry_id'] ?? 0)
             );
 
             $journalService = new JournalPostingService($this->db);
@@ -593,9 +612,10 @@ class ChallanModel extends SalesModel {
 
                 $adjJournalId = (int)($challan['adjustment_journal_entry_id'] ?? 0);
                 if ($adjJournalId <= 0) {
-                    $adjJournalId = (int)($journalService->findActiveJournalIdByReference(
-                        'sales_invoice_adjustment',
-                        $invoiceId
+                    $adjJournalId = (int)($this->findChallanAdjustmentJournalId(
+                        $invoiceId,
+                        $challanCode,
+                        $journalService
                     ) ?? 0);
                 }
                 if ($adjJournalId > 0) {
@@ -616,8 +636,11 @@ class ChallanModel extends SalesModel {
             if ($restoreTransport === null || $restoreTotal === null) {
                 $subtotal = (float)($invoice['subtotal'] ?? 0);
                 $discount = (float)($invoice['discount'] ?? 0);
-                $restoreTransport = (float)($invoice['transport_cost'] ?? 0) - $transportAdjustment;
-                $restoreTotal = $subtotal + (float)$restoreTransport - $discount;
+                $restoreTransport = round((float)($invoice['transport_cost'] ?? 0) - $transportAdjustment, 2);
+                $restoreTotal = round($subtotal + (float)$restoreTransport - $discount, 2);
+            } else {
+                $restoreTransport = (float)$restoreTransport;
+                $restoreTotal = (float)$restoreTotal;
             }
 
             $this->db->query("
@@ -689,82 +712,24 @@ class ChallanModel extends SalesModel {
     }
 
     /**
-     * Restore stock at original challan issue rates (from stock_transactions).
+     * Restore stock at original challan issue rates (sales_challan_items or stock_transactions).
      */
     protected function restoreStockFromChallanIssue(
         int $challanId,
         string $challanCode,
         int $invoiceId,
         int $branchId,
-        string $reason
+        string $reason,
+        int $cogsJournalId = 0
     ): int {
-        $this->db->query("
-            SELECT product_id, warehouse_id, qty, rate
-            FROM stock_transactions
-            WHERE reference_type = 'sales_challan'
-              AND reference_id = :cid
-              AND qty < -0.0001
-            ORDER BY id ASC
-        ");
-        $this->db->bind(':cid', $challanId);
-        $movements = $this->db->resultSet();
+        $issueLines = $this->loadChallanIssueLinesForRestore($challanId, $invoiceId, $cogsJournalId);
         $itemsReversed = 0;
 
-        if ($movements !== []) {
-            foreach ($movements as $movement) {
-                $pid = (int)$movement['product_id'];
-                $wid = (int)$movement['warehouse_id'];
-                $qty = abs((float)($movement['qty'] ?? 0));
-                if ($qty <= 0 || $wid <= 0 || $pid <= 0) {
-                    continue;
-                }
-
-                if (!$this->warehouseBelongsToBranch($wid, $branchId)) {
-                    throw new Exception('Warehouse branch mismatch during challan reversal.');
-                }
-
-                $issueRate = (float)($movement['rate'] ?? 0);
-                if ($issueRate <= 0) {
-                    $issueRate = $this->stock->getWarehouseAvgCost($wid, $pid);
-                }
-
-                $this->stock->updateWarehouseStock($wid, $pid, $qty, $issueRate);
-                $this->stock->logMovement([
-                    'product_id'     => $pid,
-                    'warehouse_id'   => $wid,
-                    'qty'            => $qty,
-                    'rate'           => $issueRate,
-                    'reference_type' => 'sales_challan_reversal',
-                    'reference_id'   => $challanId,
-                    'remarks'        => "Reversal of Challan #{$challanCode}: {$reason}",
-                ]);
-                $itemsReversed++;
-
-                $this->db->query("
-                    UPDATE sales_invoice_dispatches
-                    SET dispatched_qty = 0, dispatched_ctn = 0, dispatched_at = NULL
-                    WHERE sales_invoice_id = :iid AND product_id = :pid
-                ");
-                $this->db->bind(':iid', $invoiceId);
-                $this->db->bind(':pid', $pid);
-                $this->db->execute();
-            }
-
-            return $itemsReversed;
-        }
-
-        // Legacy fallback when no stock_transactions rows exist
-        $this->db->query("
-            SELECT product_id, warehouse_id, dispatched_qty
-            FROM sales_invoice_dispatches
-            WHERE sales_invoice_id = :iid AND COALESCE(dispatched_qty, 0) > 0
-        ");
-        $this->db->bind(':iid', $invoiceId);
-        foreach ($this->db->resultSet() as $row) {
-            $pid = (int)$row['product_id'];
-            $wid = (int)$row['warehouse_id'];
-            $qty = (float)$row['dispatched_qty'];
-            if ($qty <= 0 || $wid <= 0) {
+        foreach ($issueLines as $line) {
+            $pid = (int)($line['product_id'] ?? 0);
+            $wid = (int)($line['warehouse_id'] ?? 0);
+            $qty = (float)($line['qty'] ?? 0);
+            if ($qty <= 0 || $wid <= 0 || $pid <= 0) {
                 continue;
             }
 
@@ -772,16 +737,25 @@ class ChallanModel extends SalesModel {
                 throw new Exception('Warehouse branch mismatch during challan reversal.');
             }
 
-            $avgCost = $this->stock->getWarehouseAvgCost($wid, $pid);
-            $this->stock->updateWarehouseStock($wid, $pid, $qty, $avgCost);
+            $issueRate = $this->resolveChallanIssueRate(
+                $challanId,
+                $invoiceId,
+                $pid,
+                $wid,
+                $qty,
+                $cogsJournalId,
+                isset($line['issue_rate']) ? (float)$line['issue_rate'] : null
+            );
+
+            $this->stock->updateWarehouseStock($wid, $pid, $qty, $issueRate);
             $this->stock->logMovement([
                 'product_id'     => $pid,
                 'warehouse_id'   => $wid,
                 'qty'            => $qty,
-                'rate'           => $avgCost,
+                'rate'           => $issueRate,
                 'reference_type' => 'sales_challan_reversal',
                 'reference_id'   => $challanId,
-                'remarks'        => "Reversal of Challan #{$challanCode} (legacy): {$reason}",
+                'remarks'        => "Reversal of Challan #{$challanCode}: {$reason}",
             ]);
             $itemsReversed++;
 
@@ -799,7 +773,242 @@ class ChallanModel extends SalesModel {
     }
 
     /**
-     * Undo customer_ledger transport/total adjustment from challan completion.
+     * @return list<array{product_id:int, warehouse_id:int, qty:float, issue_rate?:float}>
+     */
+    protected function loadChallanIssueLinesForRestore(int $challanId, int $invoiceId, int $cogsJournalId): array
+    {
+        if ($this->hasChallanIssueItemsTable()) {
+            $items = $this->fetchChallanIssueItems($challanId);
+            if ($items !== []) {
+                return $items;
+            }
+        }
+
+        $fromTx = $this->fetchIssueLinesFromStockTransactions($challanId);
+        if ($fromTx !== []) {
+            return $fromTx;
+        }
+
+        return $this->fetchLegacyDispatchIssueLines($challanId, $invoiceId, $cogsJournalId);
+    }
+
+    /**
+     * @return list<array{product_id:int, warehouse_id:int, qty:float, issue_rate:float}>
+     */
+    protected function fetchChallanIssueItems(int $challanId): array
+    {
+        $this->db->query("
+            SELECT product_id, warehouse_id, qty, issue_rate
+            FROM sales_challan_items
+            WHERE sales_challan_id = :cid
+            ORDER BY id ASC
+        ");
+        $this->db->bind(':cid', $challanId);
+        $rows = $this->db->resultSet() ?: [];
+
+        return array_map(static function (array $row): array {
+            return [
+                'product_id'   => (int)$row['product_id'],
+                'warehouse_id' => (int)$row['warehouse_id'],
+                'qty'          => (float)$row['qty'],
+                'issue_rate'   => (float)$row['issue_rate'],
+            ];
+        }, $rows);
+    }
+
+    /**
+     * @return list<array{product_id:int, warehouse_id:int, qty:float, issue_rate:float}>
+     */
+    protected function fetchIssueLinesFromStockTransactions(int $challanId): array
+    {
+        $this->db->query("
+            SELECT product_id, warehouse_id, qty, rate
+            FROM stock_transactions
+            WHERE reference_type = 'sales_challan'
+              AND reference_id = :cid
+              AND qty < -0.0001
+            ORDER BY id ASC
+        ");
+        $this->db->bind(':cid', $challanId);
+        $rows = $this->db->resultSet() ?: [];
+        $lines = [];
+
+        foreach ($rows as $row) {
+            $lines[] = [
+                'product_id'   => (int)$row['product_id'],
+                'warehouse_id' => (int)$row['warehouse_id'],
+                'qty'          => abs((float)($row['qty'] ?? 0)),
+                'issue_rate'   => (float)($row['rate'] ?? 0),
+            ];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * @return list<array{product_id:int, warehouse_id:int, qty:float}>
+     */
+    protected function fetchLegacyDispatchIssueLines(int $challanId, int $invoiceId, int $cogsJournalId): array
+    {
+        $this->db->query("
+            SELECT product_id, warehouse_id, dispatched_qty AS qty
+            FROM sales_invoice_dispatches
+            WHERE sales_invoice_id = :iid AND COALESCE(dispatched_qty, 0) > 0
+        ");
+        $this->db->bind(':iid', $invoiceId);
+        $rows = $this->db->resultSet() ?: [];
+        $lines = [];
+
+        foreach ($rows as $row) {
+            $qty = (float)($row['qty'] ?? 0);
+            if ($qty <= 0) {
+                continue;
+            }
+            $lines[] = [
+                'product_id'   => (int)$row['product_id'],
+                'warehouse_id' => (int)$row['warehouse_id'],
+                'qty'          => $qty,
+            ];
+        }
+
+        if ($lines === [] && $cogsJournalId > 0) {
+            throw new Exception(
+                'Cannot reverse challan: no issue lines found. Restore stock_transactions or run migration 040_sales_challan_issue_cost.sql.'
+            );
+        }
+
+        return $lines;
+    }
+
+    protected function resolveChallanIssueRate(
+        int $challanId,
+        int $invoiceId,
+        int $productId,
+        int $warehouseId,
+        float $qty,
+        int $cogsJournalId,
+        ?float $knownRate = null
+    ): float {
+        if ($knownRate !== null && $knownRate > 0) {
+            return round($knownRate, 4);
+        }
+
+        if ($this->hasChallanIssueItemsTable()) {
+            $this->db->query("
+                SELECT issue_rate FROM sales_challan_items
+                WHERE sales_challan_id = :cid
+                  AND product_id = :pid
+                  AND warehouse_id = :wid
+                ORDER BY id DESC
+                LIMIT 1
+            ");
+            $this->db->bind(':cid', $challanId);
+            $this->db->bind(':pid', $productId);
+            $this->db->bind(':wid', $warehouseId);
+            $stored = (float)($this->db->single()['issue_rate'] ?? 0);
+            if ($stored > 0) {
+                return round($stored, 4);
+            }
+        }
+
+        $this->db->query("
+            SELECT rate FROM stock_transactions
+            WHERE reference_type = 'sales_challan'
+              AND reference_id = :cid
+              AND product_id = :pid
+              AND warehouse_id = :wid
+              AND qty < -0.0001
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $this->db->bind(':cid', $challanId);
+        $this->db->bind(':pid', $productId);
+        $this->db->bind(':wid', $warehouseId);
+        $txRate = (float)($this->db->single()['rate'] ?? 0);
+        if ($txRate > 0) {
+            return round($txRate, 4);
+        }
+
+        if ($cogsJournalId > 0) {
+            $lineCount = count($this->fetchChallanIssueItems($challanId))
+                + count($this->fetchIssueLinesFromStockTransactions($challanId));
+            if ($lineCount <= 1) {
+                $cogsAmount = $this->sumJournalCogsDebit($cogsJournalId);
+                if ($cogsAmount > 0 && $qty > 0) {
+                    return round($cogsAmount / $qty, 4);
+                }
+            }
+        }
+
+        throw new Exception(
+            'Cannot resolve original issue cost for product #' . $productId
+            . ' (challan #' . $challanId . '). Re-post from stock history or run migration 040.'
+        );
+    }
+
+    protected function sumJournalCogsDebit(int $journalEntryId): float
+    {
+        $this->db->query("
+            SELECT COALESCE(SUM(jel.debit - jel.credit), 0) AS cogs
+            FROM journal_entry_lines jel
+            INNER JOIN ledgers l ON l.id = jel.ledger_id
+            WHERE jel.journal_entry_id = :jid
+              AND l.ledger_nature = 'cogs'
+        ");
+        $this->db->bind(':jid', $journalEntryId);
+        $row = $this->db->single();
+
+        return max(0.0, round((float)($row['cogs'] ?? 0), 2));
+    }
+
+    protected function saveChallanIssueLine(
+        int $challanId,
+        int $productId,
+        int $warehouseId,
+        float $qty,
+        float $issueRate
+    ): void {
+        if (!$this->hasChallanIssueItemsTable()) {
+            return;
+        }
+
+        $issueRate = round($issueRate, 4);
+        $cogsAmount = round($qty * $issueRate, 2);
+
+        $this->db->query("
+            INSERT INTO sales_challan_items
+            (sales_challan_id, product_id, warehouse_id, qty, issue_rate, cogs_amount)
+            VALUES (:cid, :pid, :wid, :qty, :rate, :cogs)
+        ");
+        $this->db->bind(':cid', $challanId);
+        $this->db->bind(':pid', $productId);
+        $this->db->bind(':wid', $warehouseId);
+        $this->db->bind(':qty', $qty);
+        $this->db->bind(':rate', $issueRate);
+        $this->db->bind(':cogs', $cogsAmount);
+        $this->db->execute();
+    }
+
+    protected function hasChallanIssueItemsTable(): bool
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        try {
+            $this->db->query("SHOW TABLES LIKE 'sales_challan_items'");
+            $cached = (bool)$this->db->single();
+        } catch (Throwable $e) {
+            $cached = false;
+        }
+
+        return $cached;
+    }
+
+    /**
+     * Undo customer_ledger transport/total adjustment posted at challan finalize only.
+     * Godown transport adjustments remain active (invoice stays at godown totals).
      */
     protected function reverseChallanTransportLedger(
         int $customerId,
@@ -828,6 +1037,7 @@ class ChallanModel extends SalesModel {
             'is_reversed'      => 1,
         ]);
 
+        $needle = '%adjustment on challan #' . $challanCode . '%';
         $this->db->query("
             UPDATE customer_ledger
             SET is_reversed = 1
@@ -835,10 +1045,63 @@ class ChallanModel extends SalesModel {
               AND reference_type = 'invoice_adjustment'
               AND reference_id = :iid
               AND COALESCE(is_reversed, 0) = 0
+              AND remarks LIKE :needle
         ");
         $this->db->bind(':cid', $customerId);
         $this->db->bind(':iid', $invoiceId);
+        $this->db->bind(':needle', $needle);
         $this->db->execute();
+    }
+
+    /**
+     * Net AR delta from challan-time invoice_adjustment rows (excludes godown saves).
+     */
+    protected function sumChallanInvoiceAdjustments(int $customerId, int $invoiceId, string $challanCode): float
+    {
+        $needle = '%adjustment on challan #' . $challanCode . '%';
+        $this->db->query("
+            SELECT COALESCE(SUM(debit - credit), 0) AS delta
+            FROM customer_ledger
+            WHERE customer_id = :cid
+              AND reference_type = 'invoice_adjustment'
+              AND reference_id = :iid
+              AND COALESCE(is_reversed, 0) = 0
+              AND remarks LIKE :needle
+        ");
+        $this->db->bind(':cid', $customerId);
+        $this->db->bind(':iid', $invoiceId);
+        $this->db->bind(':needle', $needle);
+
+        return round((float)($this->db->single()['delta'] ?? 0), 2);
+    }
+
+    /**
+     * Resolve transport adjustment GL for this challan (not another invoice/challan cycle).
+     */
+    protected function findChallanAdjustmentJournalId(
+        int $invoiceId,
+        string $challanCode,
+        JournalPostingService $journalService
+    ): ?int {
+        $needle = '%Challan #' . $challanCode . '%';
+        $this->db->query("
+            SELECT id FROM journal_entries
+            WHERE reference_type = 'sales_invoice_adjustment'
+              AND reference_id = :iid
+              AND COALESCE(is_reversed, 0) = 0
+              AND description LIKE :needle
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $this->db->bind(':iid', $invoiceId);
+        $this->db->bind(':needle', $needle);
+        $row = $this->db->single();
+
+        if (!empty($row['id'])) {
+            return (int)$row['id'];
+        }
+
+        return $journalService->findActiveJournalIdByReference('sales_invoice_adjustment', $invoiceId);
     }
 
     protected function updateChallanTransportMeta(
@@ -1381,6 +1644,142 @@ class ChallanModel extends SalesModel {
         $this->db->bind(':jid', $journalEntryId);
         $this->db->bind(':id', $challanId);
         return $this->db->execute();
+    }
+
+    /**
+     * Build Telegram alert payload after challan finalize.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function getChallanTelegramPayload(
+        int $challanId,
+        int $invoiceId,
+        string $challanCode,
+        ?float $totalAmount = null
+    ): ?array {
+        if ($invoiceId <= 0) {
+            return null;
+        }
+
+        $this->db->query("
+            SELECT
+                si.id AS invoice_id,
+                si.invoice_code,
+                si.total_amount,
+                si.salesman_id,
+                si.sales_person,
+                COALESCE(NULLIF(TRIM(c.shop_name), ''), NULLIF(TRIM(c.customer_name), ''), 'Customer') AS customer_name,
+                b.id AS branch_id,
+                b.branch_name
+            FROM sales_invoices si
+            JOIN customers c ON c.id = si.customer_id
+            JOIN branches b ON b.id = si.branch_id
+            WHERE si.id = :iid AND si.is_reversed = 0
+            LIMIT 1
+        ");
+        $this->db->bind(':iid', $invoiceId, PDO::PARAM_INT);
+        $invoice = $this->db->single();
+        if (!$invoice) {
+            return null;
+        }
+
+        $this->db->query("
+            SELECT COUNT(*) AS c
+            FROM sales_invoice_items
+            WHERE sales_invoice_id = :iid
+              AND COALESCE(dispatched_qty, ordered_qty, 0) > 0
+        ");
+        $this->db->bind(':iid', $invoiceId, PDO::PARAM_INT);
+        $itemCount = (int)($this->db->single()['c'] ?? 0);
+
+        $warehouseLabel = '—';
+        if ($challanId > 0) {
+            $this->db->query("
+                SELECT GROUP_CONCAT(DISTINCT w.warehouse_name ORDER BY w.warehouse_name SEPARATOR ', ') AS names
+                FROM sales_challan_items sci
+                JOIN warehouses w ON w.id = sci.warehouse_id
+                WHERE sci.sales_challan_id = :cid
+            ");
+            $this->db->bind(':cid', $challanId, PDO::PARAM_INT);
+            $names = trim((string)($this->db->single()['names'] ?? ''));
+            if ($names !== '') {
+                $warehouseLabel = $names;
+            }
+        }
+
+        if ($warehouseLabel === '—') {
+            $this->db->query("
+                SELECT GROUP_CONCAT(DISTINCT w.warehouse_name ORDER BY w.warehouse_name SEPARATOR ', ') AS names
+                FROM sales_invoice_dispatches sid
+                JOIN warehouses w ON w.id = sid.warehouse_id
+                WHERE sid.sales_invoice_id = :iid
+            ");
+            $this->db->bind(':iid', $invoiceId, PDO::PARAM_INT);
+            $names = trim((string)($this->db->single()['names'] ?? ''));
+            if ($names !== '') {
+                $warehouseLabel = $names;
+            }
+        }
+
+        $publicBase = defined('PUBLIC_URL') ? rtrim(PUBLIC_URL, '/') . '/' : rtrim(BASE_URL, '/') . '/';
+        $resolvedTotal = $totalAmount ?? (float)($invoice['total_amount'] ?? 0);
+
+        return [
+            'challan_id'      => $challanId,
+            'challan_code'    => $challanCode,
+            'invoice_id'      => $invoiceId,
+            'invoice_code'    => (string)($invoice['invoice_code'] ?? ''),
+            'customer_name'   => (string)($invoice['customer_name'] ?? ''),
+            'item_count'      => $itemCount,
+            'total_amount'    => $resolvedTotal,
+            'branch_id'       => (int)($invoice['branch_id'] ?? 0),
+            'branch_name'     => (string)($invoice['branch_name'] ?? ''),
+            'warehouse_label' => $warehouseLabel,
+            'formatted_at'    => date('d M Y, h:i A'),
+            'view_url'        => $publicBase . 'Challan/challan_copy/' . $invoiceId,
+        ];
+    }
+
+    /**
+     * Challan detail for GL audit surface (Phase 5A).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function getChallanForDetail(int $challanId): ?array
+    {
+        if ($challanId <= 0) {
+            return null;
+        }
+
+        $this->db->query("
+            SELECT sc.*,
+                   si.id AS invoice_id,
+                   si.invoice_code,
+                   si.branch_id,
+                   si.status AS invoice_status,
+                   c.shop_name,
+                   c.customer_name,
+                   b.branch_name
+            FROM sales_challans sc
+            INNER JOIN sales_invoices si ON si.id = sc.sales_invoice_id
+            INNER JOIN customers c ON c.id = si.customer_id
+            INNER JOIN branches b ON b.id = si.branch_id
+            WHERE sc.id = :id
+            LIMIT 1
+        ");
+        $this->db->bind(':id', $challanId, PDO::PARAM_INT);
+        $row = $this->db->single();
+        if (!$row) {
+            return null;
+        }
+
+        try {
+            $this->assertInvoiceAccessible((int)$row['branch_id']);
+        } catch (Exception $e) {
+            return null;
+        }
+
+        return $row;
     }
 
 }

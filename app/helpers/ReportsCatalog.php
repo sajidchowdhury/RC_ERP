@@ -52,6 +52,7 @@ class ReportsCatalog
                 'tagline'=> 'Track invoices, collections, and customer momentum',
                 'reports'=> [
                     self::r('revenueOverview', 'Revenue Overview', 'Invoice-level register with customer & salesman filters', 'Report/revenueOverview', 'fa-file-invoice-dollar', ['invoice', 'export'], 30, true),
+                    self::r('gross_margin', 'Gross Margin (invoice vs COGS)', 'True margin on delivery basis; invoice basis shows pipeline timing gap', 'Report/grossMargin', 'fa-percent', ['margin', 'cogs', 'export'], 30, true),
                     self::r('salesFunnelPipeline', 'Sales Funnel & Pipeline', 'Complete deal flow visibility with funnel, metrics, table, trends', 'Report/salesFunnelPipeline', 'fa-filter', ['funnel', 'pipeline'], 30, true),
                     self::r('customerPerformance', 'Customer Performance', '360° customer value, loyalty, CLV, churn risk & segmentation', 'Report/customerPerformance', 'fa-users', ['customer', 'clv', 'churn'], 30, true),
                 ],
@@ -65,6 +66,7 @@ class ReportsCatalog
                 'reports'=> [
                     self::r('supplier_wise_purchase', 'Supplier-wise Purchase', 'Spend profile per supplier — negotiate smarter', 'Report/SupplierWisePurchase', 'fa-industry', ['supplier'], 30),
                     self::r('payable_aging', 'Payable Aging', 'Outstanding supplier balances by age bucket', 'Report/PayableAging', 'fa-clock', ['aging', 'finance'], 0, true),
+                    self::r('receivable_aging', 'Receivable Aging', 'Customer due balances by age bucket with GL footnote', 'Report/ReceivableAging', 'fa-clock', ['aging', 'finance'], 0, true),
                 ],
             ],
             [
@@ -85,7 +87,13 @@ class ReportsCatalog
                 'accent' => 'finance',
                 'tagline'=> 'GL integrity, cash day book, and branch ledgers',
                 'reports'=> [
-                    self::r('trial_balance', 'Trial Balance', 'Debit = Credit? — accounting health check', 'Report/TrialBalance', 'fa-scale-balanced', ['gl', 'export'], 0, true),
+                    self::r('trial_balance', 'Trial Balance', 'Opening, period & closing — verify Dr = Cr', 'Report/TrialBalance', 'fa-scale-balanced', ['gl', 'export'], 0, true),
+                    self::r('profit_and_loss', 'Profit & Loss', 'Income − expense by ledger nature with optional compare', 'Report/ProfitAndLoss', 'fa-chart-pie', ['gl', 'export'], 30, true),
+                    self::r('cash_flow', 'Cash Flow Statement', 'Indirect method from GL with bank register reconciliation', 'Report/CashFlow', 'fa-water', ['gl', 'cash', 'export'], 30),
+                    self::r('balance_sheet', 'Balance Sheet', 'Assets = Liabilities + Equity as of date', 'Report/BalanceSheet', 'fa-building-columns', ['gl', 'export'], 0, true),
+                    self::r('journal_entries', 'GL reconciliation', 'Assets = Liabilities + Equity as of date', 'Reconciliation/index', 'fa-building-columns', ['gl', 'export'], 0, true),
+                    self::r('general_ledger', 'General Ledger', 'Account activity with running balance & source links', 'Report/GeneralLedger', 'fa-book-open', ['gl', 'export'], 30, true),
+                    self::r('journal_entries', 'Journal Entries', 'Search all JEs — filter by type, branch, user', 'Report/JournalEntries', 'fa-file-invoice', ['gl', 'export'], 30, true),
                     self::r('daily_cash_book', 'Day Book (Cash & Bank)', 'Split view: receipts vs payments in the period', 'Report/DailyCashBook', 'fa-book-open', ['cash'], 7, true),
                     self::r('branch_ledger', 'Branch Intercompany Ledger', 'Due between branches — settlement trail', 'Report/BranchWiseLedger', 'fa-arrows-left-right', ['branch'], 30),
                 ],
@@ -97,6 +105,10 @@ class ReportsCatalog
                 'accent' => 'ops',
                 'tagline'=> 'Control reports outside the standard register',
                 'reports'=> [
+                    self::r('sales_audit_checklist', 'Sales Audit Checklist', 'Invoice, payment, and dispatch control checks before close', 'SalesAudit/checklist', 'fa-clipboard-check', ['control', 'audit'], 0),
+                    self::r('purchase_audit', 'Purchase Audit Checklist', 'GRN, supplier ledger, and purchase posting integrity', 'PurchaseAudit/checklist', 'fa-truck', ['control', 'audit'], 0),
+                    self::r('stock_audit_checklist', 'Stock Audit Checklist', 'Stock take sessions, variance, and inventory GL alignment', 'StockTake/checklist', 'fa-cubes', ['control', 'audit'], 0),
+                    self::r('interbranch_audit', 'Inter-Branch Audit Checklist', 'Branch demand settlement and floor stock control', 'BranchDemand/checklist', 'fa-exchange-alt', ['control', 'audit'], 0),
                     [
                         'id'       => 'stocktake_weekly',
                         'title'    => 'Stock Take — Weekly Control',
@@ -154,7 +166,7 @@ class ReportsCatalog
             'tags'        => $tags,
             'preset_days' => $presetDays,
             'featured'    => $featured,
-            'filter_type' => $presetDays > 0 ? 'range' : ($id === 'receivable_aging' || $id === 'payable_aging' ? 'as_of' : 'range'),
+            'filter_type' => $presetDays > 0 ? 'range' : (in_array($id, ['receivable_aging', 'payable_aging', 'balance_sheet'], true) ? 'as_of' : 'range'),
         ];
     }
 
@@ -166,6 +178,9 @@ class ReportsCatalog
         $today = date('Y-m-d');
         if (($report['filter_type'] ?? '') === 'as_of') {
             $params['as_of_date'] = $today;
+            if (($report['id'] ?? '') === 'balance_sheet') {
+                $params['search'] = '1';
+            }
         } else {
             $days = (int)($report['preset_days'] ?? 30);
             if ($lens === 'today') {

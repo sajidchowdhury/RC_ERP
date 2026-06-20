@@ -4,6 +4,7 @@
 require_once __DIR__ . '/../../core/Database.php';
 require_once __DIR__ . '/../helpers/Helper.php';
 require_once __DIR__ . '/WarehouseTransferModel.php';
+require_once __DIR__ . '/BranchIntercompanyAuditModel.php';
 
 class WarehouseTransferAuditModel
 {
@@ -20,6 +21,7 @@ class WarehouseTransferAuditModel
     {
         $sections = [
             $this->sectionSameBranch(),
+            ...(new BranchIntercompanyAuditModel())->sharedInterbranchSections(),
             $this->sectionStockGl(),
             $this->sectionDataIntegrity(),
         ];

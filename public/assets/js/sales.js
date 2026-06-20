@@ -63,6 +63,135 @@ function parseSalesListResponse(json) {
 
 window.parseSalesListResponse = parseSalesListResponse;
 
+/** Barcode / exact product_code lookup for sales POS. */
+window.fetchSalesProductByExactCode = async function (code, branchId) {
+    const trimmed = String(code || '').trim();
+    if (!trimmed) return null;
+    try {
+        const url = BASE_URL + 'sales/product_by_code?code=' + encodeURIComponent(trimmed)
+            + '&branch_id=' + encodeURIComponent(String(branchId || ''));
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json && json.status === 'success' && json.data) {
+            return json.data;
+        }
+    } catch (err) {
+        console.warn('product_by_code failed', err);
+    }
+    return null;
+};
+
+/** Price range helpers (create + edit POS). */
+window.salesFormatMoney = function (n) {
+    return (parseFloat(n) || 0).toFixed(2);
+};
+
+window.salesFormatPriceRange = function (min, max, def) {
+    const lo = parseFloat(min) || 0;
+    const hi = parseFloat(max) || 0;
+    if (lo <= 0 && hi <= 0) return 'No range';
+    return '৳' + salesFormatMoney(lo) + '–' + salesFormatMoney(hi);
+};
+
+window.salesRateRangeStatus = function (rate, min, max) {
+    const r = parseFloat(rate) || 0;
+    const lo = parseFloat(min) || 0;
+    const hi = parseFloat(max) || 0;
+    if (lo <= 0 || hi <= 0) return 'unknown';
+    if (r < lo || r > hi) return 'bad';
+    const span = hi - lo;
+    if (span > 0 && (r - lo) / span < 0.08) return 'warn';
+    return 'ok';
+};
+
+window.salesRatePillHtml = function (rate, min, max) {
+    const st = salesRateRangeStatus(rate, min, max);
+    if (st === 'unknown') return '';
+    const cls = st === 'bad' ? 'sales-rate-pill-bad' : 'sales-rate-pill-ok';
+    const label = st === 'bad' ? 'Out of range' : (st === 'warn' ? 'Low margin' : 'In range');
+    return `<span class="sales-rate-pill ${cls}">${label}</span>`;
+};
+
+window.salesValidateRateClient = function (rate, min, max) {
+    const r = parseFloat(rate) || 0;
+    const lo = parseFloat(min) || 0;
+    const hi = parseFloat(max) || 0;
+    if (lo <= 0 || hi <= 0) {
+        return { valid: false, message: 'No price range configured for this product.' };
+    }
+    if (r <= 0) {
+        return { valid: false, message: 'Rate must be greater than zero.' };
+    }
+    if (r < lo - 0.0001 || r > hi + 0.0001) {
+        return {
+            valid: false,
+            message: `Rate must be between ৳${salesFormatMoney(lo)} and ৳${salesFormatMoney(hi)}.`
+        };
+    }
+    return { valid: true };
+};
+
+/** Branch + edit context for cart API calls. */
+window.getSalesCartContext = function () {
+    const branchId = document.getElementById('branch_id')?.value
+        || document.getElementById('branch_id_locked')?.value
+        || (typeof getActiveSalesBranchId === 'function' ? getActiveSalesBranchId() : '')
+        || window.SESSION_BRANCH_ID
+        || '';
+    const editing = window.isEditMode || document.getElementById('edit_mode')?.value === '1';
+    const invoiceId = window.currentInvoiceId || document.getElementById('invoice_id')?.value || '';
+    return {
+        branch_id: String(branchId),
+        exclude_invoice_id: editing && invoiceId ? String(invoiceId) : '',
+    };
+};
+
+window.appendSalesCartContext = function (formData) {
+    const ctx = getSalesCartContext();
+    if (ctx.branch_id) formData.append('branch_id', ctx.branch_id);
+    if (ctx.exclude_invoice_id) formData.append('exclude_invoice_id', ctx.exclude_invoice_id);
+    return formData;
+};
+
+window.applyCartValidationUi = function (validation, customerId) {
+    const valid = validation?.valid !== false;
+    const msg = validation?.message || '';
+
+    document.querySelectorAll('.finalSubmitBtn, #posStickyFinalize').forEach(btn => {
+        btn.disabled = !valid;
+        btn.classList.toggle('disabled', !valid);
+        btn.title = valid ? '' : (msg || 'Fix cart errors before submitting');
+    });
+
+    const container = document.getElementById('single-cart-area')
+        || document.querySelector(`#cart-${customerId} .cart-container`);
+    if (!container) return;
+
+    container.querySelectorAll('.sales-cart-invalid-banner').forEach(el => el.remove());
+
+    if (!valid && msg) {
+        const parts = [];
+        (validation.rate_errors || []).forEach(e => parts.push(e));
+        (validation.stock_errors || []).forEach(e => parts.push(e));
+        const html = parts.length ? parts.map(e => `<li>${escapeHtml(e)}</li>`).join('') : `<li>${escapeHtml(msg)}</li>`;
+        const banner = document.createElement('div');
+        banner.className = 'sales-cart-invalid-banner alert alert-danger py-2 px-3 mb-2';
+        banner.innerHTML = `<strong>Cannot finalize until fixed:</strong><ul class="mb-0 small ps-3">${html}</ul>`;
+        container.prepend(banner);
+    }
+};
+
+window.showCartValidationError = function (data) {
+    let msg = data.message || 'Cart validation failed';
+    const parts = [];
+    (data.rate_errors || []).forEach(e => parts.push(e));
+    (data.stock_errors || []).forEach(e => parts.push(e));
+    if (parts.length) {
+        msg += '<ul class="text-start small mt-2 mb-0">' + parts.map(e => `<li>${escapeHtml(e)}</li>`).join('') + '</ul>';
+    }
+    Swal.fire({ icon: 'error', title: 'Cannot proceed', html: msg });
+};
+
 document.addEventListener('DOMContentLoaded', function() {
     const baseInput = document.getElementById('base_url');
     BASE_URL = baseInput ? baseInput.value : '/remote-center-erp/public/';
@@ -662,6 +791,7 @@ async function loadCart(customer_id) {
     try {
         const formData = new FormData();
         formData.append('customer_id', customer_id);
+        appendSalesCartContext(formData);
 
         const res = await fetch(BASE_URL + "sales/load_cart", salesPostOptions(appendCsrf(formData)));
 
@@ -682,22 +812,32 @@ async function loadCart(customer_id) {
                 const total = parseFloat(item.total || item.qty * item.rate);
                 const qty = parseFloat(item.qty) || 0;
                 const rate = parseFloat(item.rate) || 0;
+                const minR = item.min_rate;
+                const maxR = item.max_rate;
+                const ratePill = typeof salesRatePillHtml === 'function'
+                    ? salesRatePillHtml(rate, minR, maxR) : '';
+                const rateMinAttr = minR != null ? ` min="${minR}"` : '';
+                const rateMaxAttr = maxR != null ? ` max="${maxR}"` : '';
                 desktopRows += `
                     <tr data-index="${i}">
                         <td>${i + 1}</td>
-                        <td>${escapeHtml(item.product_name)}</td>
+                        <td>${escapeHtml(item.product_name)}${ratePill}</td>
                         <td class="text-end"><input type="number" step="0.01" value="${qty}" class="form-control form-control-sm qty-input" style="width:80px;min-height:44px"></td>
-                        <td class="text-end"><input type="number" step="0.01" value="${rate}" class="form-control form-control-sm rate-input" style="width:90px;min-height:44px"></td>
+                        <td class="text-end"><input type="number" step="0.01" value="${rate}" class="form-control form-control-sm rate-input" style="width:90px;min-height:44px"${rateMinAttr}${rateMaxAttr} data-min-rate="${minR ?? ''}" data-max-rate="${maxR ?? ''}"></td>
                         <td class="text-end total-col">${total.toFixed(2)}</td>
                         <td><button type="button" class="btn btn-sm btn-danger delete-item" data-index="${i}">Delete</button></td>
                     </tr>`;
                 mobileHtml += `
                     <div class="sales-cart-line" data-index="${i}">
                         <div class="d-flex justify-content-between">
-                            <div class="line-title">${escapeHtml(item.product_name)}</div>
+                            <div class="line-title">${escapeHtml(item.product_name)}${ratePill}</div>
                             <button type="button" class="btn btn-sm btn-outline-danger delete-item" data-index="${i}"><i class="fas fa-trash"></i></button>
                         </div>
-                        <div class="line-meta">Rate ৳${rate.toFixed(2)} · Line ৳${total.toFixed(2)}</div>
+                        <div class="line-meta">Line ৳${total.toFixed(2)}</div>
+                        <div class="sales-mobile-rate">
+                            <label class="small text-muted mb-0">Rate</label>
+                            <input type="number" step="0.01" class="form-control form-control-sm rate-input-mobile" value="${rate}" data-index="${i}"${rateMinAttr}${rateMaxAttr} data-min-rate="${minR ?? ''}" data-max-rate="${maxR ?? ''}">
+                        </div>
                         <div class="sales-qty-stepper mt-2">
                             <button type="button" class="btn btn-outline-secondary qty-step" data-delta="-1" data-index="${i}">−</button>
                             <span class="qty-display">${qty}</span>
@@ -730,6 +870,7 @@ async function loadCart(customer_id) {
 
         container.innerHTML = html;
         updatePosStickyBar(items.length, subtotal);
+        applyCartValidationUi(data.validation, customer_id);
         saveCartDraftBackup(customer_id, items);
         initCartSwipeRemove(customer_id, container);
 
@@ -772,22 +913,81 @@ function attachCartListeners(customer_id) {
         });
     });
 
-    // Qty / Rate live update
+    // Qty / Rate live update — server is authoritative; revert UI on failure
+    async function persistCartLine(row, qty, rate) {
+        const index = row.dataset.index;
+        const rateInput = row.querySelector('.rate-input');
+        const minR = rateInput?.dataset.minRate;
+        const maxR = rateInput?.dataset.maxRate;
+
+        const rateCheck = salesValidateRateClient(rate, minR, maxR);
+        if (!rateCheck.valid) {
+            Swal.fire({ icon: 'error', title: 'Invalid rate', text: rateCheck.message });
+            loadCart(customer_id);
+            return false;
+        }
+
+        if (qty <= 0 || rate <= 0) {
+            Swal.fire({ icon: 'error', title: 'Invalid line', text: 'Qty and rate must be greater than zero.' });
+            loadCart(customer_id);
+            return false;
+        }
+
+        const fd = appendSalesCartContext(new FormData());
+        fd.append('customer_id', customer_id);
+        fd.append('index', index);
+        fd.append('qty', qty);
+        fd.append('rate', rate);
+
+        const res = await fetch(BASE_URL + 'sales/update_cart_item', salesPostOptions(appendCsrf(fd)));
+        const result = await res.json();
+        if (result.status !== 'success') {
+            showCartValidationError(result);
+            loadCart(customer_id);
+            return false;
+        }
+        return true;
+    }
+
     container.querySelectorAll('.qty-input, .rate-input').forEach(input => {
         input.addEventListener('change', async function() {
             const row = this.closest('tr');
-            const index = row.dataset.index;
+            if (!row) return;
             const qty = parseFloat(row.querySelector('.qty-input').value) || 0;
             const rate = parseFloat(row.querySelector('.rate-input').value) || 0;
+            const ok = await persistCartLine(row, qty, rate);
+            if (ok) loadCart(customer_id);
+        });
+    });
 
-            const fd = new FormData();
+    container.querySelectorAll('.rate-input-mobile').forEach(input => {
+        input.addEventListener('change', async function() {
+            const index = this.dataset.index;
+            const row = container.querySelector(`tr[data-index="${index}"]`);
+            const qty = parseFloat(row?.querySelector('.qty-input')?.value)
+                || parseFloat(container.querySelector(`.sales-cart-line[data-index="${index}"] .qty-display`)?.textContent)
+                || 0;
+            const rate = parseFloat(this.value) || 0;
+
+            const rateCheck = salesValidateRateClient(rate, this.dataset.minRate, this.dataset.maxRate);
+            if (!rateCheck.valid) {
+                Swal.fire({ icon: 'error', title: 'Invalid rate', text: rateCheck.message });
+                loadCart(customer_id);
+                return;
+            }
+
+            const fd = appendSalesCartContext(new FormData());
             fd.append('customer_id', customer_id);
             fd.append('index', index);
             fd.append('qty', qty);
             fd.append('rate', rate);
 
-            await fetch(BASE_URL + '/sales/update_cart_item', salesPostOptions(appendCsrf(fd)));
-            loadCart(customer_id);   // refresh
+            const res = await fetch(BASE_URL + 'sales/update_cart_item', salesPostOptions(appendCsrf(fd)));
+            const result = await res.json();
+            if (result.status !== 'success') {
+                showCartValidationError(result);
+            }
+            loadCart(customer_id);
         });
     });
 
@@ -820,11 +1020,14 @@ function attachCartListeners(customer_id) {
         btn.addEventListener('click', async () => {
             const index = btn.dataset.index;
             const row = container.querySelector(`tr[data-index="${index}"]`);
-            const qtyInput = row?.querySelector('.qty-input');
+            if (!row) return;
+            const qtyInput = row.querySelector('.qty-input');
             if (!qtyInput) return;
             const delta = parseFloat(btn.dataset.delta) || 0;
-            qtyInput.value = Math.max(0.01, (parseFloat(qtyInput.value) || 0) + delta);
-            qtyInput.dispatchEvent(new Event('change'));
+            const newQty = Math.max(0.01, (parseFloat(qtyInput.value) || 0) + delta);
+            const rate = parseFloat(row.querySelector('.rate-input')?.value) || 0;
+            const ok = await persistCartLine(row, newQty, rate);
+            if (ok) loadCart(customer_id);
         });
     });
 
@@ -873,6 +1076,22 @@ async function submitFinalInvoice(customer_id) {
 
     const transport = parseFloat(container.querySelector('.transport_cost').value) || 0;
     const discount  = parseFloat(container.querySelector('.discount').value) || 0;
+
+    // Hard gate — server validates session cart (price range + stock)
+    const validateFd = appendSalesCartContext(new FormData());
+    validateFd.append('customer_id', customer_id);
+    try {
+        const vRes = await fetch(BASE_URL + 'sales/validate_cart', salesPostOptions(appendCsrf(validateFd)));
+        const vData = await vRes.json();
+        if (!vData.valid) {
+            showCartValidationError(vData);
+            loadCart(customer_id);
+            return;
+        }
+    } catch (e) {
+        Swal.fire('Error', 'Could not validate cart. Try again.', 'error');
+        return;
+    }
 
     const formData = new FormData();
     formData.append('customer_id', customer_id);
@@ -971,11 +1190,7 @@ async function submitFinalInvoice(customer_id) {
             });
         } 
         else {
-            let msg = data.message || 'Something went wrong';
-            if (data.stock_errors && data.stock_errors.length) {
-                msg += '<br><small>' + data.stock_errors.join('<br>') + '</small>';
-            }
-            Swal.fire({ icon: 'error', title: 'Error', html: msg });
+            showCartValidationError(data);
         }
     } catch (e) {
         console.error("Final Submit Error:", e);
@@ -1156,7 +1371,7 @@ function updatePosStickyBar(itemCount, subtotal) {
     if (itemCount > 0) {
         bar.classList.add('visible');
         summary.textContent = `${itemCount} item(s) · ৳${grand.toFixed(2)}`;
-        if (btn) btn.disabled = false;
+        if (btn && !btn.title) btn.disabled = false;
     } else {
         bar.classList.remove('visible');
         summary.textContent = '0 items · ৳0';

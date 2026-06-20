@@ -1,6 +1,8 @@
 # Sales ecosystem — role matrix (Phase 7)
 
-Roles come from `users.role` / `employees.role` (enum): `admin`, `manager`, `salesman`, `warehouse_manager`, `dispatcher`, `accountant`, `hr`, `other`.
+Roles are defined centrally in `app/config/roles.php` — see **`docs/ROLE_DEFINITIONS.md`** for the full catalog and tier model.
+
+Operational roles below come from `employees.role`: `admin`, `manager`, `salesman`, `warehouse_manager`, `dispatcher`, `accountant`, `hr`, `other`.
 
 **Admin** bypasses all checks in `RouteAccess`. Branch isolation still applies via `Helper::assertInvoiceAccessible()`.
 
@@ -13,7 +15,7 @@ Roles come from `users.role` / `employees.role` (enum): `admin`, `manager`, `sal
 | `sales/delete_invoice` | Yes | — | — | — | Yes | Yes |
 | `sales/save_payment` | Yes | — | — | Yes | Yes | Yes |
 | `sales/reverse_payment` | — | — | — | Yes | Yes | Yes |
-| `sales/reconcile` | — | — | — | Yes | Yes | Yes |
+| `Reconciliation/index` · `Accounting/Reconciliation` · `sales/reconcile` (alias) | — | — | — | Yes | Yes | Yes |
 | `sales/export` | Yes | — | — | Yes | Yes | Yes |
 
 \*Salesmen on **Today** see only their own invoices unless `canSeeAllBranchInvoices()` (manager/admin).

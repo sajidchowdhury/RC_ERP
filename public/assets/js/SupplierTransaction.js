@@ -1,5 +1,5 @@
 /**
- * Supplier payments — index (DataTable + mobile cards), create, reverse.
+ * Supplier payments — index (server-side DataTable + mobile cards), create, reverse.
  */
 (function () {
     'use strict';
@@ -17,6 +17,21 @@
     };
 
     let suppTable = null;
+    const ST_RECENTS_KEY = 'supp_txn_supplier_recents';
+
+    function debounce(fn, ms) {
+        let t;
+        return function (...args) {
+            clearTimeout(t);
+            t = setTimeout(() => fn.apply(this, args), ms);
+        };
+    }
+
+    function shortSupplierLabel(s) {
+        if (!s) return 'Supplier';
+        const name = (s.supplier_name || 'Supplier').trim();
+        return name.length > 28 ? name.slice(0, 28) + '…' : name;
+    }
 
     function stBaseUrl() {
         if (window.ST_BOOT?.baseUrl) {
@@ -66,18 +81,11 @@
         document.body.addEventListener('click', (e) => {
             const btn = e.target.closest('.js-supp-reverse');
             if (!btn) return;
-            reverseTransaction(
-                btn.dataset.paymentId,
-                btn.dataset.paymentCode
-            );
+            reverseTransaction(btn.dataset.paymentId, btn.dataset.paymentCode);
         });
 
-        const txnTable = document.getElementById('suppTxnTable');
-        if (txnTable && txnTable.querySelector('tbody tr')) {
-            initIndexTable();
-        } else if (document.getElementById('suppTxnCards')) {
-            document.getElementById('suppTxnCards').innerHTML =
-                '<p class="text-muted text-center py-4 mb-0">No transactions found.</p>';
+        if (document.getElementById('suppTxnTable')) {
+            initIndexPage(base);
         }
 
         if (document.getElementById('supplierTransactionForm')) {
@@ -89,9 +97,149 @@
         });
     });
 
-    function initIndexTable() {
+    function suppTxnTypeLabel(type) {
+        return TYPE_LABELS[type] || (type ? type.charAt(0).toUpperCase() + type.slice(1) : '');
+    }
+
+    function suppTxnTypeClass(type) {
+        const t = String(type || '').replace(/[^a-z_]/gi, '').toLowerCase();
+        return ['payment', 'advance', 'receive'].includes(t) ? t : 'payment';
+    }
+
+    function formatPaymentDate(value) {
+        if (!value) return '—';
+        const parts = String(value).split('-');
+        if (parts.length !== 3) return value;
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function getSuppTxnFilterParams() {
+        const form = document.getElementById('suppTxnFilterForm');
+        if (!form) return {};
+        return {
+            date_from: form.querySelector('[name="date_from"]')?.value || '',
+            date_to: form.querySelector('[name="date_to"]')?.value || '',
+            transaction_type: form.querySelector('[name="transaction_type"]')?.value || 'all',
+            status: form.querySelector('[name="status"]')?.value || 'all',
+            payment_mode: form.querySelector('[name="payment_mode"]')?.value || 'all',
+            supplier_id: form.querySelector('[name="supplier_id"]')?.value || '',
+        };
+    }
+
+    function syncSuppTxnFilterUrl() {
+        const form = document.getElementById('suppTxnFilterForm');
+        if (!form || !window.history?.replaceState) return;
+        const params = new URLSearchParams(getSuppTxnFilterParams());
+        Object.keys(Object.fromEntries(params)).forEach((key) => {
+            const val = params.get(key);
+            if (!val || val === 'all') params.delete(key);
+        });
+        const qs = params.toString();
+        const base = (window.ST_BASE || stBaseUrl()) + 'SupplierTransaction';
+        window.history.replaceState(null, '', qs ? base + '?' + qs : base);
+    }
+
+    function initFilterSupplierSearch(base) {
+        const searchInput = document.getElementById('filter_supplier_search');
+        const hiddenInput = document.getElementById('filter_supplier_id');
+        const suggestBox = document.getElementById('filterSupplierSuggestions');
+        const clearBtn = document.getElementById('suppTxnClearSupplierBtn');
+        if (!searchInput || !hiddenInput || !suggestBox) return;
+
+        const cache = {};
+        const pre = window.ST_BOOT?.filterSupplier;
+        if (pre?.id) cache[pre.id] = pre;
+
+        searchInput.addEventListener('input', debounce(async function () {
+            const term = this.value.trim();
+            hiddenInput.value = '';
+            if (term.length < 1) {
+                suggestBox.classList.remove('show');
+                suggestBox.innerHTML = '';
+                return;
+            }
+            try {
+                const res = await fetch(base + 'SupplierTransaction/search_supplier?term=' + encodeURIComponent(term), {
+                    credentials: 'same-origin',
+                });
+                const rows = await parseJsonResponse(res);
+                const list = Array.isArray(rows) ? rows : (rows.data || []);
+                let html = '';
+                list.forEach((s) => {
+                    cache[s.id] = s;
+                    html += `<button type="button" class="supp-txn-suggest-item" data-id="${escapeHtml(s.id)}">
+                        <span class="suggest-title">${escapeHtml(s.supplier_name || '')}</span>
+                        <span class="suggest-meta">${escapeHtml(s.supplier_code || '')}${s.mobile ? ' · ' + escapeHtml(s.mobile) : ''}</span>
+                    </button>`;
+                });
+                suggestBox.innerHTML = html || '<div class="supp-txn-suggest-empty">No supplier found</div>';
+                suggestBox.classList.add('show');
+            } catch (e) {
+                console.error('Filter supplier search failed', e);
+            }
+        }, 250));
+
+        suggestBox.addEventListener('click', (e) => {
+            const btn = e.target.closest('.supp-txn-suggest-item');
+            if (!btn) return;
+            const id = btn.dataset.id;
+            const s = cache[id];
+            hiddenInput.value = id;
+            searchInput.value = s?.supplier_name || btn.querySelector('.suggest-title')?.textContent || '';
+            suggestBox.classList.remove('show');
+            suggestBox.innerHTML = '';
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.supp-txn-filter-supplier')) {
+                suggestBox.classList.remove('show');
+            }
+        });
+
+        clearBtn?.addEventListener('click', () => {
+            hiddenInput.value = '';
+            searchInput.value = '';
+            suggestBox.classList.remove('show');
+            suggestBox.innerHTML = '';
+            suppTable?.ajax.reload();
+            syncSuppTxnFilterUrl();
+        });
+    }
+
+    function initIndexPage(base) {
+        window.ST_BASE = base;
+        const showReversed = !!window.showReversed;
+        initFilterSupplierSearch(base);
+
+        const form = document.getElementById('suppTxnFilterForm');
+        if (showReversed) {
+            const statusField = form?.querySelector('[name="status"]');
+            if (statusField) {
+                statusField.value = 'reversed';
+                statusField.disabled = true;
+            }
+        }
+
+        form?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            suppTable?.ajax.reload();
+            syncSuppTxnFilterUrl();
+        });
+
+        document.getElementById('suppTxnTodayBtn')?.addEventListener('click', () => {
+            const today = new Date().toISOString().slice(0, 10);
+            form.querySelector('[name="date_from"]').value = today;
+            form.querySelector('[name="date_to"]').value = today;
+            suppTable?.ajax.reload();
+            syncSuppTxnFilterUrl();
+        });
+
+        initIndexTable(base, showReversed);
+    }
+
+    function initIndexTable(base, showReversed) {
         if (typeof $ === 'undefined' || !$.fn.DataTable) {
-            renderMobileCardsFromDom();
             return;
         }
 
@@ -101,15 +249,125 @@
         }
 
         suppTable = $table.DataTable({
+            processing: true,
+            serverSide: true,
+            ajax: {
+                url: base + 'SupplierTransaction' + (showReversed ? '?reversed=1' : ''),
+                data(d) {
+                    Object.assign(d, getSuppTxnFilterParams());
+                    if (showReversed) {
+                        d.reversedMode = 'only_reversed';
+                    }
+                },
+            },
             pageLength: 25,
             order: [[0, 'desc']],
+            dom: '<"branch-dt-toolbar"lf>Brt<"branch-dt-footer"ip>',
+            buttons: ['copy', 'excel', 'pdf'],
             language: {
-                emptyTable: 'No transactions for selected filters',
+                processing: '<i class="fas fa-circle-notch fa-spin me-1"></i> Loading payments…',
+                emptyTable: 'No payments match these filters',
+                zeroRecords: 'No matching payments',
                 search: 'Quick search:',
             },
             columnDefs: [
                 { orderable: false, targets: -1 },
+                { className: 'd-none d-lg-table-cell', targets: 6 },
             ],
+            columns: [
+                {
+                    data: 'payment_date',
+                    render(data, type) {
+                        if (type === 'sort' || type === 'type') return data || '';
+                        return `<small class="text-nowrap">${escapeHtml(formatPaymentDate(data))}</small>`;
+                    },
+                },
+                {
+                    data: 'payment_code',
+                    render(data) {
+                        return `<span class="branch-code-pill">${escapeHtml(data || '')}</span>`;
+                    },
+                },
+                {
+                    data: 'supplier_name',
+                    render(data, type, row) {
+                        const name = data || '—';
+                        const initial = name.charAt(0).toUpperCase();
+                        const mobile = row.mobile
+                            ? `<div class="branch-contact"><i class="fas fa-phone"></i> ${escapeHtml(row.mobile)}</div>`
+                            : '';
+                        const hub = row.supplier_id
+                            ? `<div class="name"><a href="${base}supplier/show/${row.supplier_id}" class="text-decoration-none text-reset">${escapeHtml(name)}</a></div>`
+                            : `<div class="name">${escapeHtml(name)}</div>`;
+                        return `<div class="branch-name-cell">
+                            <div class="branch-avatar">${escapeHtml(initial)}</div>
+                            <div>${hub}${mobile}</div>
+                        </div>`;
+                    },
+                },
+                {
+                    data: 'transaction_type',
+                    render(data) {
+                        const cls = suppTxnTypeClass(data);
+                        return `<span class="supp-txn-type-pill ${cls}">${escapeHtml(suppTxnTypeLabel(data))}</span>`;
+                    },
+                },
+                {
+                    data: 'amount',
+                    className: 'text-end',
+                    render(data, type, row) {
+                        const cls = suppTxnTypeClass(row.transaction_type);
+                        return `<span class="supp-txn-amount ${cls}">${formatMoney(data)}</span>`;
+                    },
+                },
+                {
+                    data: 'payment_mode',
+                    render(data) {
+                        return escapeHtml(String(data || '').toUpperCase());
+                    },
+                },
+                {
+                    data: 'collected_by_name',
+                    className: 'd-none d-lg-table-cell',
+                    render(data) {
+                        return escapeHtml(data || '—');
+                    },
+                },
+                {
+                    data: 'is_reversed',
+                    render(data) {
+                        const reversed = parseInt(data, 10) === 1;
+                        return reversed
+                            ? '<span class="branch-status-pill inactive"><span class="dot"></span> Reversed</span>'
+                            : '<span class="branch-status-pill active"><span class="dot"></span> Active</span>';
+                    },
+                },
+                {
+                    data: 'id',
+                    orderable: false,
+                    className: 'text-center',
+                    render(data, type, row) {
+                        let html = '<div class="branch-action-bar">';
+                        html += `<a href="${base}SupplierTransaction/details/${data}" class="btn-action view" title="Details"><i class="fas fa-eye"></i></a>`;
+                        if (!showReversed && parseInt(row.can_reverse, 10) === 1) {
+                            html += `<button type="button" class="btn-action toggle-off js-supp-reverse"
+                                data-payment-id="${data}"
+                                data-payment-code="${escapeHtml(row.payment_code || '')}"
+                                title="Reverse payment"><i class="fas fa-rotate-left"></i></button>`;
+                        }
+                        html += '</div>';
+                        return html;
+                    },
+                },
+            ],
+            createdRow(row, data) {
+                if (parseInt(data.is_reversed, 10) === 1) {
+                    $(row).addClass('table-secondary').attr('data-status', 'reversed');
+                } else {
+                    $(row).attr('data-status', 'active');
+                }
+                $(row).attr('data-mode', String(data.payment_mode || '').toLowerCase());
+            },
             drawCallback() {
                 renderMobileCards(suppTable);
             },
@@ -142,7 +400,7 @@
             const date = $tr.find('td:first small').text().trim();
             const mode = $tr.find('td').eq(5).text().trim();
             const reversed = $tr.hasClass('table-secondary') || $tr.data('status') === 'reversed';
-            const canReverse = $tr.find('.js-supp-reverse').length > 0;
+            const canReverse = !window.showReversed && $tr.find('.js-supp-reverse').length > 0;
 
             html += `<article class="supp-txn-mobile-card${reversed ? ' reversed' : ''}">
                 <div class="d-flex justify-content-between align-items-start gap-2">
@@ -171,47 +429,226 @@
         });
 
         container.innerHTML = html
-            || '<p class="text-muted text-center py-4 mb-0">No transactions found.</p>';
+            || '<p class="text-muted text-center py-4 mb-0">No payments found.</p>';
     }
 
-    function renderMobileCardsFromDom() {
-        const container = document.getElementById('suppTxnCards');
-        const tbody = document.querySelector('#suppTxnTable tbody');
-        if (!container || !tbody || window.innerWidth >= 768) return;
+    async function loadSupplierDue(base, supplierId, dueSummary) {
+        if (!dueSummary) return;
 
-        const base = window.ST_BASE || stBaseUrl();
-        let html = '';
-        tbody.querySelectorAll('tr').forEach((tr) => {
-            const revBtn = tr.querySelector('.js-supp-reverse');
-            const detailsLink = tr.querySelector('a[href*="details/"]');
-            const id = revBtn?.dataset.paymentId || detailsLink?.href?.split('/').pop() || '';
-            const code = tr.querySelector('.branch-code-pill')?.textContent?.trim() || '';
-            const supplier = tr.querySelector('.branch-name-cell .name')?.textContent?.trim() || '';
-            const typePill = tr.querySelector('.supp-txn-type-pill');
-            const typeCls = [...(typePill?.classList || [])].find((c) => c !== 'supp-txn-type-pill') || 'payment';
-            const typeLabel = typePill?.textContent?.trim() || '';
-            const amount = tr.querySelector('.supp-txn-amount')?.textContent?.trim() || '';
-            const date = tr.querySelector('td small')?.textContent?.trim() || '';
-            const reversed = tr.classList.contains('table-secondary');
+        if (!supplierId) {
+            dueSummary.classList.add('d-none');
+            dueSummary.innerHTML = '';
+            return;
+        }
 
-            html += `<article class="supp-txn-mobile-card${reversed ? ' reversed' : ''}">
-                <div class="d-flex justify-content-between">
-                    <strong class="branch-code-pill">${escapeHtml(code)}</strong>
-                    <span class="supp-txn-type-pill ${escapeHtml(typeCls)}">${escapeHtml(typeLabel)}</span>
-                </div>
-                <div class="mt-1">${escapeHtml(supplier)}</div>
-                <div class="d-flex justify-content-between mt-2">
-                    <span class="small text-muted">${escapeHtml(date)}</span>
-                    <span class="supp-txn-amount ${escapeHtml(typeCls)}">${escapeHtml(amount)}</span>
-                </div>
-                <div class="mt-2 d-flex gap-2">
-                    <a href="${base}SupplierTransaction/details/${id}" class="btn btn-sm btn-outline-primary">Details</a>
-                    ${revBtn ? `<button type="button" class="btn btn-sm btn-outline-danger js-supp-reverse"
-                        data-payment-id="${id}" data-payment-code="${escapeHtml(code)}">Reverse</button>` : ''}
-                </div>
-            </article>`;
+        dueSummary.classList.remove('d-none');
+        dueSummary.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Loading payable…';
+
+        try {
+            const response = await fetch(base + 'SupplierTransaction/get_due', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                credentials: 'same-origin',
+                body: 'supplier_id=' + encodeURIComponent(supplierId),
+            });
+            const data = await parseJsonResponse(response);
+            if (data.status === 'success') {
+                dueSummary.innerHTML =
+                    '<i class="fas fa-wallet me-1"></i> Payable now: <strong>' +
+                    formatMoney(data.due_balance) + '</strong>';
+            } else {
+                dueSummary.innerHTML = '<span class="text-danger">Could not load payable balance</span>';
+            }
+        } catch (e) {
+            console.error('Failed to load supplier due', e);
+            dueSummary.innerHTML = '<span class="text-danger">Error loading payable</span>';
+        }
+    }
+
+    function rememberSuppTxnRecent(supplierId, label) {
+        if (!supplierId) return;
+        let recents = [];
+        try {
+            recents = JSON.parse(localStorage.getItem(ST_RECENTS_KEY) || '[]');
+        } catch (e) {
+            recents = [];
+        }
+        recents = recents.filter((r) => String(r.id) !== String(supplierId));
+        recents.unshift({ id: supplierId, label: label || ('Supplier #' + supplierId) });
+        localStorage.setItem(ST_RECENTS_KEY, JSON.stringify(recents.slice(0, 5)));
+    }
+
+    function renderSuppTxnRecents(base, cache, onSelect) {
+        const box = document.getElementById('suppTxnSupplierRecents');
+        if (!box) return;
+
+        let recents = [];
+        try {
+            recents = JSON.parse(localStorage.getItem(ST_RECENTS_KEY) || '[]');
+        } catch (e) {
+            recents = [];
+        }
+
+        if (!recents.length) {
+            box.classList.add('d-none');
+            box.innerHTML = '';
+            return;
+        }
+
+        box.classList.remove('d-none');
+        box.innerHTML = recents.map((r) =>
+            `<button type="button" class="btn btn-outline-secondary btn-sm" data-id="${escapeHtml(r.id)}">${escapeHtml(r.label)}</button>`
+        ).join('');
+
+        box.querySelectorAll('button').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = parseInt(btn.dataset.id, 10);
+                if (cache[id]) {
+                    onSelect(id, cache[id]);
+                    return;
+                }
+                onSelect(id, { id, supplier_name: btn.textContent.trim() });
+            });
         });
-        container.innerHTML = html || '<p class="text-muted text-center py-4">No transactions found.</p>';
+    }
+
+    function initSupplierPicker(base, dueSummary, onSupplierChange) {
+        const searchInput = document.getElementById('suppTxnSupplierSearch');
+        const suggestBox = document.getElementById('suppTxnSupplierSuggestions');
+        const supplierIdInput = document.getElementById('supplier_id');
+        const changeBtn = document.getElementById('suppTxnChangeSupplier');
+        const hubLink = document.getElementById('suppTxnSupplierHubLink');
+        const hubAnchor = document.getElementById('suppTxnSupplierHubAnchor');
+        const recentsBox = document.getElementById('suppTxnSupplierRecents');
+        const searchLabel = document.getElementById('suppTxnSupplierSearchLabel');
+        const cache = {};
+        let selectedLabel = '';
+
+        if (!searchInput || !supplierIdInput) {
+            return { getLabel: () => 'Supplier', init: () => {} };
+        }
+
+        function setLocked(locked, supplier) {
+            if (locked && supplier) {
+                selectedLabel = shortSupplierLabel(supplier);
+                searchInput.value = selectedLabel;
+                searchInput.readOnly = true;
+                searchInput.classList.add('is-locked');
+                changeBtn?.classList.remove('d-none');
+                recentsBox?.classList.add('is-hidden');
+                if (searchLabel) {
+                    searchLabel.innerHTML = 'Supplier <span class="text-danger">*</span> <span class="text-muted small fw-normal">(selected)</span>';
+                }
+                if (hubLink && hubAnchor) {
+                    hubLink.classList.remove('d-none');
+                    hubAnchor.href = base + 'supplier/show/' + supplier.id;
+                }
+            } else {
+                selectedLabel = '';
+                searchInput.readOnly = false;
+                searchInput.classList.remove('is-locked');
+                searchInput.value = '';
+                changeBtn?.classList.add('d-none');
+                recentsBox?.classList.remove('is-hidden');
+                if (searchLabel) {
+                    searchLabel.innerHTML = 'Supplier <span class="text-danger">*</span>';
+                }
+                hubLink?.classList.add('d-none');
+            }
+        }
+
+        function selectSupplier(id, supplier) {
+            if (!id) return;
+            cache[id] = supplier || cache[id] || { id, supplier_name: 'Supplier #' + id };
+            supplierIdInput.value = String(id);
+            suggestBox?.classList.remove('show');
+            if (suggestBox) suggestBox.innerHTML = '';
+            setLocked(true, cache[id]);
+            rememberSuppTxnRecent(id, shortSupplierLabel(cache[id]));
+            renderSuppTxnRecents(base, cache, selectSupplier);
+            loadSupplierDue(base, id, dueSummary);
+            onSupplierChange?.();
+        }
+
+        function clearSelection() {
+            supplierIdInput.value = '';
+            setLocked(false);
+            if (dueSummary) {
+                dueSummary.classList.add('d-none');
+                dueSummary.innerHTML = '';
+            }
+            onSupplierChange?.();
+            searchInput.focus();
+        }
+
+        searchInput.addEventListener('input', debounce(async function () {
+            const term = this.value.trim();
+            if (!suggestBox) return;
+            if (term.length < 1) {
+                suggestBox.classList.remove('show');
+                suggestBox.innerHTML = '';
+                return;
+            }
+
+            try {
+                const res = await fetch(base + 'SupplierTransaction/search_supplier?term=' + encodeURIComponent(term), {
+                    credentials: 'same-origin',
+                });
+                const data = await parseJsonResponse(res);
+                const rows = Array.isArray(data) ? data : (data.data || []);
+                let html = '';
+                rows.forEach((s) => {
+                    cache[s.id] = s;
+                    html += `<button type="button" class="supp-txn-suggest-item" data-id="${escapeHtml(s.id)}">
+                        <span class="suggest-title">${escapeHtml(s.supplier_name || '')}</span>
+                        <span class="suggest-meta">${escapeHtml(s.supplier_code || '')}${s.mobile ? ' · ' + escapeHtml(s.mobile) : ''}</span>
+                    </button>`;
+                });
+                suggestBox.innerHTML = html || '<div class="supp-txn-suggest-empty">No supplier found</div>';
+                suggestBox.classList.add('show');
+            } catch (e) {
+                console.error('Supplier search failed', e);
+                suggestBox.innerHTML = '<div class="supp-txn-suggest-empty">Search failed — try again</div>';
+                suggestBox.classList.add('show');
+            }
+        }, 250));
+
+        suggestBox?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.supp-txn-suggest-item');
+            if (!btn) return;
+            selectSupplier(parseInt(btn.dataset.id, 10), cache[btn.dataset.id]);
+        });
+
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const first = suggestBox?.querySelector('.supp-txn-suggest-item');
+                if (first) selectSupplier(parseInt(first.dataset.id, 10), cache[first.dataset.id]);
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#suppTxnSupplierSearch') && !e.target.closest('#suppTxnSupplierSuggestions')) {
+                suggestBox?.classList.remove('show');
+            }
+        });
+
+        changeBtn?.addEventListener('click', clearSelection);
+
+        return {
+            getLabel: () => selectedLabel || searchInput.value.trim() || 'Supplier',
+            selectSupplier,
+            init() {
+                renderSuppTxnRecents(base, cache, selectSupplier);
+                const pre = window.ST_BOOT?.preselectSupplier;
+                if (pre?.id) {
+                    cache[pre.id] = pre;
+                    selectSupplier(parseInt(pre.id, 10), pre);
+                } else if (supplierIdInput.value) {
+                    selectSupplier(parseInt(supplierIdInput.value, 10), null);
+                }
+            },
+        };
     }
 
     function initCreateForm(base) {
@@ -219,11 +656,40 @@
         const modeSelect = document.getElementById('mode');
         const bankSection = document.getElementById('bank_section');
         const bankSelect = document.getElementById('bank_id');
-        const supplierSelect = document.getElementById('supplier_id');
+        const supplierIdInput = document.getElementById('supplier_id');
         const dueSummary = document.getElementById('dueSummary');
         const typeSelect = document.getElementById('transaction_type');
         const amountInput = document.getElementById('amount');
         const typeHint = document.getElementById('typeHint');
+        const glPreview = document.getElementById('accounting_preview');
+        const glLabels = window.ST_BOOT?.glLabels || {};
+        const glPreviewApi = window.AccountingJournalPreview;
+        let supplierPicker = { getLabel: () => 'Supplier', init: () => {} };
+
+        function renderGlPreview(type, amt, mode, bankName) {
+            if (!glPreviewApi) {
+                return;
+            }
+            glPreviewApi.renderSupplierPreview(glPreview, {
+                type,
+                amount: amt,
+                mode,
+                bankName,
+                glLabels,
+                partySelected: !!supplierIdInput?.value,
+            });
+        }
+
+        function updatePreview() {
+            const type = typeSelect?.value || '';
+            const amt = parseFloat(amountInput?.value || 0);
+            const mode = modeSelect?.value || 'cash';
+            const bankName = bankSelect?.selectedOptions?.[0]?.text || glLabels.bank || 'Bank';
+            renderGlPreview(type, amt, mode, bankName);
+        }
+
+        supplierPicker = initSupplierPicker(base, dueSummary, updatePreview);
+        supplierPicker.init();
 
         function syncModeVisibility() {
             if (modeSelect && bankSection) {
@@ -239,8 +705,12 @@
         }
 
         if (modeSelect && bankSection) {
-            modeSelect.addEventListener('change', syncModeVisibility);
+            modeSelect.addEventListener('change', () => {
+                syncModeVisibility();
+                updatePreview();
+            });
         }
+        bankSelect?.addEventListener('change', updatePreview);
 
         if (typeSelect) {
             typeSelect.addEventListener('change', () => {
@@ -253,72 +723,21 @@
             });
         }
 
-        function updatePreview() {
-            const supOpt = supplierSelect?.selectedOptions?.[0];
-            const name = supOpt?.textContent?.trim() || 'Supplier';
-            const initial = name.charAt(0) || '?';
-            const type = typeSelect?.value || '';
-            const amt = parseFloat(amountInput?.value || 0);
-
-            document.getElementById('previewAvatar')?.replaceChildren(document.createTextNode(initial));
-            const pn = document.getElementById('previewSupplier');
-            if (pn) pn.textContent = name.split('(')[0].trim();
-            const pt = document.getElementById('previewType');
-            if (pt) pt.textContent = TYPE_LABELS[type] || 'Select type';
-            const pa = document.getElementById('previewAmount');
-            if (pa) {
-                pa.textContent = formatMoney(amt);
-                pa.className = 'mt-2 supp-txn-amount ' + (type || 'payment');
-            }
-        }
-
-        [supplierSelect, typeSelect, amountInput].forEach((el) => {
+        [typeSelect, amountInput].forEach((el) => {
             if (el) el.addEventListener('input', updatePreview);
             if (el) el.addEventListener('change', updatePreview);
         });
 
-        if (supplierSelect && dueSummary) {
-            supplierSelect.addEventListener('change', async function () {
-                const supplierId = this.value;
-                updatePreview();
-                if (!supplierId) {
-                    dueSummary.classList.add('d-none');
-                    dueSummary.innerHTML = '';
-                    return;
-                }
-
-                dueSummary.classList.remove('d-none');
-                dueSummary.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Loading payable…';
-
-                try {
-                    const response = await fetch(base + 'SupplierTransaction/get_due', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        credentials: 'same-origin',
-                        body: 'supplier_id=' + encodeURIComponent(supplierId),
-                    });
-                    const data = await parseJsonResponse(response);
-                    if (data.status === 'success') {
-                        dueSummary.innerHTML =
-                            '<i class="fas fa-wallet me-1"></i> Payable now: <strong>' +
-                            formatMoney(data.due_balance) + '</strong>';
-                    } else {
-                        dueSummary.innerHTML = '<span class="text-danger">Could not load payable balance</span>';
-                    }
-                } catch (e) {
-                    console.error('Failed to load supplier due', e);
-                    dueSummary.innerHTML = '<span class="text-danger">Error loading payable</span>';
-                }
-            });
-
-            if (supplierSelect.value) {
-                supplierSelect.dispatchEvent(new Event('change'));
-            }
-        }
-
         if (form) {
             form.addEventListener('submit', async function (e) {
                 e.preventDefault();
+
+                if (!supplierIdInput?.value) {
+                    Swal.fire('Supplier required', 'Search and select a supplier.', 'warning');
+                    document.getElementById('suppTxnSupplierSearch')?.focus();
+                    return;
+                }
+
                 if (!form.checkValidity()) {
                     form.classList.add('was-validated');
                     return;

@@ -25,9 +25,10 @@ function productAuditLabel(string $action): string {
         str_contains($action, 'product_updated') => 'Updated',
         str_contains($action, 'product_deactivated') => 'Deactivated',
         str_contains($action, 'product_restored') => 'Restored',
-        str_contains($action, 'product_price_added') => 'Price added',
+        str_contains($action, 'product_price_added') => 'Price range added',
         str_contains($action, 'product_price_deleted') => 'Price deleted',
         str_contains($action, 'product_bulk') => 'Bulk action',
+        str_contains($action, 'product_group') => 'Group',
         str_contains($action, 'category') => 'Category',
         default => $action,
     };
@@ -37,8 +38,20 @@ function productAuditDetails($details): string {
     $parts = [];
     if (!empty($details['product_name'])) $parts[] = '<strong>Product:</strong> ' . htmlspecialchars((string)$details['product_name'], ENT_QUOTES);
     if (!empty($details['product_code'])) $parts[] = '<strong>Code:</strong> ' . htmlspecialchars((string)$details['product_code'], ENT_QUOTES);
-    if (!empty($details['sales_rate'])) $parts[] = '<strong>Rate:</strong> Tk ' . number_format((float)$details['sales_rate'], 2);
+    if (!empty($details['group_name'])) $parts[] = '<strong>Group:</strong> ' . htmlspecialchars((string)$details['group_name'], ENT_QUOTES);
     if (!empty($details['category_name'])) $parts[] = '<strong>Category:</strong> ' . htmlspecialchars((string)$details['category_name'], ENT_QUOTES);
+    if (isset($details['min_rate'], $details['max_rate'], $details['default_rate'])) {
+        $parts[] = '<strong>Range:</strong> Tk ' . number_format((float)$details['min_rate'], 2)
+            . ' – ' . number_format((float)$details['max_rate'], 2)
+            . ' (def. ' . number_format((float)$details['default_rate'], 2) . ')';
+    } elseif (!empty($details['sales_rate'])) {
+        $parts[] = '<strong>Rate:</strong> Tk ' . number_format((float)$details['sales_rate'], 2);
+    }
+    if (isset($details['previous_default_rate'])) {
+        $parts[] = '<strong>Was:</strong> Tk ' . number_format((float)$details['previous_min_rate'], 2)
+            . '–' . number_format((float)$details['previous_max_rate'], 2)
+            . ' (def. ' . number_format((float)$details['previous_default_rate'], 2) . ')';
+    }
     if (!empty($details['count'])) $parts[] = '<strong>Count:</strong> ' . (int)$details['count'];
     if (empty($parts)) {
         return '<span class="branch-audit-details">' . htmlspecialchars(json_encode($details, JSON_UNESCAPED_UNICODE), ENT_QUOTES) . '</span>';
@@ -53,7 +66,7 @@ function productAuditDetails($details): string {
     <header class="branch-hub-hero">
         <div>
             <h1><i class="fas fa-clock-rotate-left me-2"></i>Product audit trail</h1>
-            <p>Creates, updates, prices, categories, bulk actions — last 300 product events.</p>
+            <p>Creates, updates, price ranges, groups, categories, bulk actions — last 300 product events.</p>
         </div>
         <div class="branch-hub-actions">
             <a href="<?= BASE_URL ?>product/create" class="btn btn-outline-light btn-sm"><i class="fas fa-plus me-1"></i> New product</a>
@@ -87,10 +100,11 @@ function productAuditDetails($details): string {
                     <?php else: foreach ($logs as $log):
                         $action = (string)($log['action'] ?? '');
                         $cls = productAuditClass($action);
+                        $userLabel = htmlspecialchars($log['performed_by_name'] ?? ('#' . (int)($log['performed_by'] ?? 0)), ENT_QUOTES);
                     ?>
                     <tr>
                         <td><small class="text-nowrap"><?= htmlspecialchars($log['timestamp'] ?? '', ENT_QUOTES) ?></small></td>
-                        <td><span class="badge rounded-pill bg-light text-dark border">#<?= (int)($log['performed_by'] ?? 0) ?></span></td>
+                        <td><span class="badge rounded-pill bg-light text-dark border"><?= $userLabel ?></span></td>
                         <td><span class="branch-audit-action <?= $cls ?>"><?= htmlspecialchars(productAuditLabel($action), ENT_QUOTES) ?></span></td>
                         <td><strong><?= htmlspecialchars((string)($log['target_user_id'] ?? '—'), ENT_QUOTES) ?></strong></td>
                         <td><?= productAuditDetails($log['details'] ?? []) ?></td>

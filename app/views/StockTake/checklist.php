@@ -4,6 +4,7 @@ $sections = $report['sections'] ?? [];
 $summary = $report['summary'] ?? [];
 $branchName = $branch_name ?? 'Branch';
 $ranAt = $report['ran_at'] ?? date('Y-m-d H:i:s');
+$missingSessionJournals = $report['missing_session_journals'] ?? [];
 
 $statusIcon = static function (string $status): string {
     return match ($status) {
@@ -73,6 +74,27 @@ ob_start();
         </section>
         <?php endforeach; ?>
     </div>
+
+    <?php if ($missingSessionJournals !== []): ?>
+    <section class="purch-audit-section mt-3">
+        <div class="purch-audit-section-head"><i class="fas fa-cubes"></i> Posted sessions missing journal (sample)</div>
+        <div class="table-responsive p-2">
+            <table class="table table-sm table-bordered mb-0">
+                <thead><tr><th>Session</th><th>Date</th><th class="text-end">Variance value</th><th></th></tr></thead>
+                <tbody>
+                <?php foreach ($missingSessionJournals as $row): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($row['session_code'] ?? '', ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($row['take_date'] ?? '', ENT_QUOTES) ?></td>
+                        <td class="text-end"><?= number_format((float)($row['variance_value'] ?? 0), 2) ?></td>
+                        <td><a href="<?= BASE_URL ?>StockTake/details/<?= (int)($row['id'] ?? 0) ?>">GL detail</a></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <?php endif; ?>
 </div>
 
 <script>

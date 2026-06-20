@@ -4,6 +4,7 @@
 require_once '../core/BaseController.php';
 require_once '../app/models/PurchaseReceiveModel.php';
 require_once '../core/UserAudit.php';
+require_once '../app/helpers/PurchaseGlAuditHelper.php';
 
 class PurchaseReceiveController extends BaseController {
 
@@ -139,9 +140,12 @@ public function store() {
         $this->redirect('PurchaseReceive');
     }
 
+    $receiveId = (int)$id;
     $data = [
-        'title' => 'GRN Details #' . $receive['receive_code'],
-        'receive' => $receive
+        'title'          => 'GRN Details #' . $receive['receive_code'],
+        'receive'        => $receive,
+        'journal_blocks' => PurchaseGlAuditHelper::grnJournalBlocks($receive),
+        'returns'        => PurchaseGlAuditHelper::getReceiveReturns($receiveId),
     ];
 
     $this->view('PurchaseReceive/details', $data);

@@ -4,6 +4,7 @@
 require_once '../core/BaseController.php';
 require_once '../app/models/SupplierModel.php';
 require_once '../core/UserAudit.php';
+require_once __DIR__ . '/../helpers/MasterDataAuditHelper.php';
 
 class SupplierController extends BaseController {
 
@@ -17,7 +18,6 @@ class SupplierController extends BaseController {
     }
 
     public function index() {
-        // Handle DataTables server-side request
         if (isset($_GET['draw'])) {
             $params = $_GET;
             $params['includeDeleted'] = isset($_GET['deleted']) && $_GET['deleted'] == '1';
@@ -28,7 +28,6 @@ class SupplierController extends BaseController {
             exit;
         }
 
-        // Normal page load
         $showDeleted = isset($_GET['deleted']) && $_GET['deleted'] == '1';
 
         $data = [
@@ -37,6 +36,28 @@ class SupplierController extends BaseController {
             'stats'       => $this->supplierModel->getSupplierIndexStats(),
         ];
         $this->view('supplier/index', $data);
+    }
+
+    public function show($id = null) {
+        if (!$id) {
+            $this->redirect('supplier/index');
+        }
+
+        $supplierId = (int)$id;
+        $supplier = $this->supplierModel->getSupplierById($supplierId);
+        if (!$supplier) {
+            $_SESSION['error'] = 'Supplier not found!';
+            $this->redirect('supplier/index');
+        }
+
+        $this->view('supplier/show', [
+            'title'    => ($supplier['supplier_name'] ?? 'Supplier') . ' — Hub',
+            'supplier' => $supplier,
+            'summary'  => $this->supplierModel->getSupplierHubSummary($supplierId),
+            'ledger'   => $this->supplierModel->getRecentLedgerEntries($supplierId),
+            'receives' => $this->supplierModel->getRecentPurchaseReceives($supplierId),
+            'payments' => $this->supplierModel->getRecentPayments($supplierId),
+        ]);
     }
 
     public function create() {
@@ -51,8 +72,10 @@ class SupplierController extends BaseController {
             $result = $this->supplierModel->createSupplier($_POST);
 
             if ($result['status'] === 'success') {
-                $this->userAudit->log($_SESSION['user_id'] ?? 0, 'supplier_created', null, [
-                    'supplier_name' => $_POST['supplier_name'] ?? ''
+                $this->userAudit->log($_SESSION['user_id'] ?? 0, 'supplier_created', (int)($result['id'] ?? 0), [
+                    'supplier_code' => $result['supplier_code'] ?? '',
+                    'supplier_name' => $_POST['supplier_name'] ?? '',
+                    'mobile'        => $_POST['mobile'] ?? '',
                 ]);
 
                 $_SESSION['success'] = $result['message'];
@@ -85,12 +108,24 @@ class SupplierController extends BaseController {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && $id) {
             $this->validateCSRF();
 
-            $result = $this->supplierModel->updateSupplier($id, $_POST);
+            $supplierId = (int)$id;
+            $before = $this->supplierModel->getSupplierById($supplierId);
+            if (!$before) {
+                $_SESSION['error'] = 'Supplier not found!';
+                $this->redirect('supplier/index');
+            }
+
+            $result = $this->supplierModel->updateSupplier($supplierId, $_POST);
 
             if ($result['status'] === 'success') {
-                $this->userAudit->log($_SESSION['user_id'] ?? 0, 'supplier_updated', (int)$id, [
-                    'supplier_name' => $_POST['supplier_name'] ?? ''
-                ]);
+                $after = array_merge($before, $this->supplierModel->getSupplierById($supplierId) ?: []);
+                $details = MasterDataAuditHelper::buildUpdateDetails(
+                    $before,
+                    $after,
+                    MasterDataAuditHelper::SUPPLIER_FIELDS
+                );
+
+                $this->userAudit->log($_SESSION['user_id'] ?? 0, 'supplier_updated', $supplierId, $details);
 
                 $_SESSION['success'] = $result['message'];
             } else {
@@ -112,19 +147,13 @@ class SupplierController extends BaseController {
 
             $isCurrentlyActive = (int)$supplier['is_active'] === 1;
 
-            // Safety check only when trying to deactivate
             if ($isCurrentlyActive) {
                 $safety = $this->supplierModel->getDeactivationSafetyStatus((int)$id);
                 if (!$safety['can_deactivate']) {
-                    $msg = "Cannot deactivate this supplier.";
-                    if ($safety['has_outstanding']) {
-                        $msg .= " Outstanding balance: " . number_format($safety['outstanding_balance'], 2);
-                    }
-                    if ($safety['has_purchase_history']) {
-                        $msg .= ($safety['has_outstanding'] ? ". " : " ") . "Has " . number_format($safety['purchase_count']) . " purchase record(s).";
-                    }
-                    $msg .= " Clear dues before changing status.";
-                    echo json_encode(['status' => 'error', 'message' => $msg]);
+                    echo json_encode([
+                        'status'  => 'error',
+                        'message' => $this->supplierModel->getDeactivationMessage((int)$id),
+                    ]);
                     exit;
                 }
             }
@@ -141,9 +170,6 @@ class SupplierController extends BaseController {
         $this->redirect('supplier/index');
     }
 
-    /**
-     * Soft delete (deactivate) a supplier
-     */
     public function delete($id = null) {
         if (!$id) {
             echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
@@ -155,16 +181,12 @@ class SupplierController extends BaseController {
         $safety = $this->supplierModel->getDeactivationSafetyStatus((int)$id);
 
         if (!$safety['can_deactivate']) {
-            $msg = "Cannot deactivate this supplier.";
-            if ($safety['has_outstanding']) {
-                $msg .= " Outstanding balance: " . number_format($safety['outstanding_balance'], 2);
-            }
-            if ($safety['has_purchase_history']) {
-                $msg .= ($safety['has_outstanding'] ? ". " : " ") . "Has " . number_format($safety['purchase_count']) . " purchase record(s).";
-            }
-            $msg .= " Please clear dues or review related purchase records before archiving.";
-
-            echo json_encode(['status' => 'error', 'message' => $msg, 'safety' => $safety]);
+            echo json_encode([
+                'status'  => 'error',
+                'message' => $this->supplierModel->getDeactivationMessage((int)$id)
+                    . ' Please clear dues or review related purchase records before archiving.',
+                'safety'  => $safety,
+            ]);
             exit;
         }
 
@@ -178,9 +200,6 @@ class SupplierController extends BaseController {
         exit;
     }
 
-    /**
-     * Restore a soft-deleted supplier
-     */
     public function restore($id = null) {
         if (!$id) {
             echo json_encode(['status' => 'error', 'message' => 'Invalid ID']);
@@ -199,15 +218,13 @@ class SupplierController extends BaseController {
         exit;
     }
 
-    /**
-     * Audit Log viewer for Supplier-related actions
-     */
     public function audit() {
-        $logs = $this->userAudit->getRecentLogs(300, 'supplier_'); // Only supplier-related actions
+        $logs = $this->userAudit->getRecentLogs(300, 'supplier_');
+        $logs = MasterDataAuditHelper::enrichLogsWithUserNames($logs);
 
         $data = [
             'title' => 'Supplier Audit Logs',
-            'logs' => $logs
+            'logs'  => $logs,
         ];
 
         $this->view('supplier/audit', $data);

@@ -13,7 +13,7 @@ $branch_name = $branch_name ?? 'Head Office';
 <input type="hidden" id="base_url" value="<?= BASE_URL ?>">
 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES) ?>">
 
-<div class="branch-hub money-transfer-theme container-fluid py-2">
+<div class="branch-hub money-transfer-theme acct-money-app container-fluid py-2">
     <header class="branch-hub-hero">
         <div>
             <h1><i class="fas fa-exchange-alt me-2"></i>Money Transfers</h1>
@@ -65,27 +65,23 @@ $branch_name = $branch_name ?? 'Head Office';
     </div>
 
     <!-- Quick Nav -->
-    <nav class="branch-hub-quick">
-        <a href="<?= BASE_URL ?>bank"><i class="fas fa-building-columns"></i> Banks</a>
-        <a href="<?= BASE_URL ?>branch"><i class="fas fa-code-branch"></i> Branches</a>
-        <a href="<?= BASE_URL ?>ledger"><i class="fas fa-book"></i> Ledger</a>
-        <a href="<?= BASE_URL ?>MoneyTransfer/audit"><i class="fas fa-history"></i> Audit</a>
-    </nav>
+    <?php include __DIR__ . '/../../partials/accounting_quick_nav.php'; ?>
 
-    <div class="branch-hub-panel">
-        <!-- Filters -->
-        <div class="branch-hub-filters">
-            <div class="row g-3 align-items-end">
-                <div class="col-sm-3 col-md-2">
-                    <div class="filter-label">From Date</div>
+    <div class="branch-hub-panel acct-has-mobile-cards">
+        <div class="branch-hub-filters acct-touch-filters" role="search" aria-label="Filter money transfers">
+            <details class="acct-filter-drawer" open>
+                <summary><i class="fas fa-filter"></i> Filters</summary>
+                <div class="row g-3 align-items-end">
+                <div class="col-6 col-md-2">
+                    <label class="filter-label" for="fromDate">From date</label>
                     <input type="date" id="fromDate" class="form-control form-control-sm" value="<?= $fromDate ?? '' ?>">
                 </div>
-                <div class="col-sm-3 col-md-2">
-                    <div class="filter-label">To Date</div>
+                <div class="col-6 col-md-2">
+                    <label class="filter-label" for="toDate">To date</label>
                     <input type="date" id="toDate" class="form-control form-control-sm" value="<?= $toDate ?? '' ?>">
                 </div>
-                <div class="col-sm-3 col-md-2">
-                    <div class="filter-label">Transfer Type</div>
+                <div class="col-6 col-md-2">
+                    <label class="filter-label" for="filterType">Transfer type</label>
                     <select id="filterType" class="form-select form-select-sm">
                         <option value="">All Types</option>
                         <option value="cash_to_bank">Cash → Bank</option>
@@ -94,24 +90,24 @@ $branch_name = $branch_name ?? 'Head Office';
                         <option value="bank_to_bank">Bank → Bank</option>
                     </select>
                 </div>
-                <div class="col-sm-3 col-md-2">
-                    <div class="filter-label">Status</div>
+                <div class="col-6 col-md-2">
+                    <label class="filter-label" for="filterStatus">Status</label>
                     <select id="filterStatus" class="form-select form-select-sm">
                         <option value="">All</option>
                         <option value="active">Active</option>
                         <option value="reversed">Reversed</option>
                     </select>
                 </div>
-                <div class="col-sm-auto">
-                    <button type="button" id="clearFilters" class="btn btn-outline-secondary btn-sm btn-clear">
+                <div class="col-12 col-md-auto">
+                    <button type="button" id="clearFilters" class="btn btn-outline-secondary btn-sm btn-clear w-100" aria-label="Reset filters">
                         <i class="fas fa-rotate-left me-1"></i> Reset
                     </button>
                 </div>
-            </div>
+                </div>
+            </details>
         </div>
 
-        <!-- Desktop Table -->
-        <div class="branch-hub-table-wrap d-none d-md-block">
+        <div class="branch-hub-table-wrap acct-desktop-table">
             <table class="table table-borderless mb-0 w-100" id="transferTable">
                 <thead>
                     <tr>
@@ -130,8 +126,7 @@ $branch_name = $branch_name ?? 'Head Office';
             </table>
         </div>
 
-        <!-- Mobile Cards -->
-        <div id="transferCards" class="d-md-none"></div>
+        <div id="transferCards" class="acct-mobile-only acct-mobile-list" aria-live="polite" aria-label="Money transfers"></div>
     </div>
 </div>
 

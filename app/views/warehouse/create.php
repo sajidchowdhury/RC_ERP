@@ -2,7 +2,7 @@
 ob_start();
 $title = $title ?? 'Create New Warehouse';
 $branches = $branches ?? [];
-$preselectBranch = (int)($_GET['branch'] ?? 0);
+$preselectBranch = (int)($preselectBranch ?? $_GET['branch'] ?? 0);
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/warehouse-theme.css">

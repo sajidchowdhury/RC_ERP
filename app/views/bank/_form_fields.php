@@ -1,7 +1,8 @@
 <?php
-/** @var array $bank @var bool $isEdit */
+/** @var array $bank @var bool $isEdit @var bool $canDeactivate */
 $bank = $bank ?? [];
 $isEdit = !empty($isEdit);
+$canDeactivate = $canDeactivate ?? true;
 $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 ?>
 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
@@ -38,7 +39,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         <span class="icon-wrap amber"><i class="fas fa-power-off"></i></span>
         Status
     </div>
-    <p class="small text-muted mb-2">Inactive accounts are hidden from payment dropdowns.</p>
+    <p class="small text-muted mb-2">Deactivation is blocked while balance is non-zero or linked transactions exist.</p>
     <div class="branch-status-toggle">
         <div class="status-option">
             <input type="radio" name="is_active" id="bankActive" value="1"
@@ -47,8 +48,11 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         </div>
         <div class="status-option">
             <input type="radio" name="is_active" id="bankInactive" value="0"
-                   <?= empty($bank['is_active']) ? 'checked' : '' ?>>
-            <label for="bankInactive" class="inactive-opt"><i class="fas fa-circle-xmark"></i> Inactive</label>
+                   <?= empty($bank['is_active']) ? 'checked' : '' ?>
+                   <?= ($canDeactivate || empty($bank['is_active'])) ? '' : 'disabled' ?>>
+            <label for="bankInactive" class="inactive-opt<?= (!$canDeactivate && !empty($bank['is_active'])) ? ' opacity-50' : '' ?>">
+                <i class="fas fa-circle-xmark"></i> Inactive
+            </label>
         </div>
     </div>
 </div>

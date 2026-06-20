@@ -2,12 +2,10 @@
 $transfer = $transfer ?? [];
 $items = $items ?? [];
 $movements = $movements ?? [];
-$journals = $journals ?? [];
+$journal_blocks = $journal_blocks ?? [];
 $transferAudit = $transfer_audit ?? [];
 $auditItems = $transferAudit['items'] ?? [];
 $auditSummary = $transferAudit['summary'] ?? [];
-$journalFrom = $journals['from_branch'] ?? null;
-$journalTo = $journals['to_branch'] ?? null;
 
 $isReversed = !empty($transfer['is_reversed']);
 $code = $transfer['transfer_code'] ?? '';
@@ -30,6 +28,7 @@ ob_start();
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/purchase-audit-checklist.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/stock-take.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/warehouse-transfer.css">
+<link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 
 <div class="purch-index-app st-take-app wt-transfer-app container-fluid py-2">
     <header class="purch-index-hero wt-hero">
@@ -158,25 +157,7 @@ ob_start();
         </div>
     </section>
 
-    <?php if ($journalFrom || $journalTo): ?>
-    <section class="st-section-card mb-3">
-        <div class="st-section-head"><i class="fas fa-book me-1"></i> Linked GL (branch demand)</div>
-        <div class="p-3 row g-3">
-            <?php if ($journalFrom): ?>
-            <div class="col-md-6">
-                <h6 class="small fw-bold">Sender — <?= htmlspecialchars($transfer['from_branch'] ?? '', ENT_QUOTES) ?></h6>
-                <?php renderJournalMini($journalFrom); ?>
-            </div>
-            <?php endif; ?>
-            <?php if ($journalTo): ?>
-            <div class="col-md-6">
-                <h6 class="small fw-bold">Receiver — <?= htmlspecialchars($transfer['to_branch'] ?? '', ENT_QUOTES) ?></h6>
-                <?php renderJournalMini($journalTo); ?>
-            </div>
-            <?php endif; ?>
-        </div>
-    </section>
-    <?php endif; ?>
+    <?php include __DIR__ . '/../partials/sales_gl_journal_blocks.php'; ?>
 
     <section class="st-section-card">
         <div class="st-section-head">Stock movements</div>
@@ -210,30 +191,6 @@ ob_start();
         </div>
     </section>
 </div>
-
-<?php
-function renderJournalMini(?array $je): void {
-    if (!$je) return;
-    ?>
-    <p class="small mb-1">
-        <strong><?= htmlspecialchars($je['entry_no'] ?? '', ENT_QUOTES) ?></strong>
-        <?php if (!empty($je['is_reversed'])): ?><span class="badge bg-danger">Reversed</span><?php endif; ?>
-    </p>
-    <table class="table table-sm mb-0">
-        <thead class="table-light"><tr><th>Ledger</th><th class="text-end">Dr</th><th class="text-end">Cr</th></tr></thead>
-        <tbody>
-        <?php foreach ($je['lines'] ?? [] as $jl): ?>
-        <tr>
-            <td class="small"><?= htmlspecialchars($jl['ledger_name'] ?? '', ENT_QUOTES) ?></td>
-            <td class="text-end"><?= (float)($jl['debit'] ?? 0) > 0 ? number_format((float)$jl['debit'], 2) : '—' ?></td>
-            <td class="text-end"><?= (float)($jl['credit'] ?? 0) > 0 ? number_format((float)$jl['credit'], 2) : '—' ?></td>
-        </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
-    <?php
-}
-?>
 
 <script>window.WT_BOOT = { baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?> };</script>
 <input type="hidden" id="base_url" value="<?= htmlspecialchars(BASE_URL, ENT_QUOTES) ?>">

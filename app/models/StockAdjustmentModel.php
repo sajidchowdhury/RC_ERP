@@ -94,6 +94,16 @@ class StockAdjustmentModel extends Helper {
                 throw new Exception('Add at least one valid item');
             }
 
+            if ($adjustmentType === 'decrease') {
+                $this->Assert_Warehouse_Lines_Available(array_map(static function (array $item) use ($warehouseId): array {
+                    return [
+                        'product_id'   => (int)$item['product_id'],
+                        'warehouse_id' => $warehouseId,
+                        'qty'          => (float)$item['qty'],
+                    ];
+                }, $lineItems));
+            }
+
             $this->db->query("
                 INSERT INTO stock_adjustments 
                 (adjustment_code, adjustment_date, warehouse_id, adjustment_type, 

@@ -4,6 +4,19 @@ $workspaceId = $workspace_id ?? 'salesReturnCreateRoot';
 $isCompact = !empty($compact);
 ?>
 <div id="<?= htmlspecialchars($workspaceId, ENT_QUOTES) ?>" class="sr-create-workspace<?= $isCompact ? ' sr-create-workspace--compact' : '' ?>" data-sr-workspace>
+    <?php if (!$isCompact): ?>
+    <div class="sr-journey-steps sr-journey-steps--panel mb-3" aria-label="Return process">
+        <div class="sr-journey-step is-active">
+            <span class="sr-journey-num">1</span>
+            <span class="sr-journey-label">Receive from customer</span>
+        </div>
+        <span class="sr-journey-arrow" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
+        <div class="sr-journey-step is-muted">
+            <span class="sr-journey-num">2</span>
+            <span class="sr-journey-label">Warehouse confirm</span>
+        </div>
+    </div>
+    <?php endif; ?>
     <div class="sr-create-step sr-create-step-find" data-step="find">
         <div class="sr-create-find-head">
             <span class="sr-create-step-badge">1</span>

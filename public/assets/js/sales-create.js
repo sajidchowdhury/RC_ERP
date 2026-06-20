@@ -6,6 +6,7 @@
 
     let activeCustomerId = null;
     let customerCache = {};
+    let activePriceRange = null;
 
     document.addEventListener('DOMContentLoaded', function () {
         if (!document.getElementById('sales-create-app')) return;
@@ -29,6 +30,7 @@
         initAddToCartCreate();
         initCartDock();
         initPosStickyBar();
+        initPriceRangePanel();
         renderCustomerRecents();
 
         document.getElementById('branch_id')?.addEventListener('change', () => {
@@ -86,6 +88,125 @@
         const input = document.getElementById('customerSearch');
         setCustomerPickerLocked(false);
         input?.focus();
+    }
+
+    function initPriceRangePanel() {
+        const rateInput = document.getElementById('sales_rate');
+        rateInput?.addEventListener('input', () => updatePriceBandUi());
+        rateInput?.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('addToCartBtn')?.click();
+            }
+        });
+
+        document.getElementById('btnUseDefaultRate')?.addEventListener('click', () => {
+            if (!activePriceRange) return;
+            const def = parseFloat(activePriceRange.default_rate) || 0;
+            if (def > 0) {
+                document.getElementById('sales_rate').value = def;
+                updatePriceBandUi();
+                document.getElementById('quantity')?.focus();
+            }
+        });
+    }
+
+    function setActivePriceRange(product) {
+        if (!product) {
+            activePriceRange = null;
+            return;
+        }
+        const min = parseFloat(product.min_rate) || 0;
+        const max = parseFloat(product.max_rate) || 0;
+        const def = parseFloat(product.default_rate ?? product.price) || 0;
+        if (min <= 0 || max <= 0) {
+            activePriceRange = null;
+            return;
+        }
+        activePriceRange = { min_rate: min, max_rate: max, default_rate: def };
+    }
+
+    function updatePriceBandUi() {
+        const panel = document.getElementById('priceRangePanel');
+        const rateInput = document.getElementById('sales_rate');
+        const statusEl = document.getElementById('priceRangeStatus');
+        if (!panel || !rateInput) return;
+
+        if (!activePriceRange) {
+            panel.classList.add('d-none');
+            rateInput.removeAttribute('min');
+            rateInput.removeAttribute('max');
+            rateInput.classList.remove('sales-rate-out', 'sales-rate-in');
+            return;
+        }
+
+        const { min_rate: min, max_rate: max, default_rate: def } = activePriceRange;
+        const rate = parseFloat(rateInput.value) || 0;
+        const span = max - min;
+
+        panel.classList.remove('d-none');
+        document.getElementById('priceBandMin').textContent = fmtMoney(min);
+        document.getElementById('priceBandMax').textContent = fmtMoney(max);
+        document.getElementById('priceBandDefault').textContent = fmtMoney(def);
+
+        rateInput.min = min;
+        rateInput.max = max;
+
+        const pct = span > 0 ? Math.min(100, Math.max(0, ((rate - min) / span) * 100)) : 0;
+        const defPct = span > 0 ? Math.min(100, Math.max(0, ((def - min) / span) * 100)) : 50;
+
+        document.getElementById('priceBandFill').style.width = pct + '%';
+        document.getElementById('priceBandThumb').style.left = pct + '%';
+        document.getElementById('priceBandDefaultMark').style.left = defPct + '%';
+
+        const st = typeof salesRateRangeStatus === 'function'
+            ? salesRateRangeStatus(rate, min, max)
+            : (rate >= min && rate <= max ? 'ok' : 'bad');
+
+        rateInput.classList.toggle('sales-rate-out', st === 'bad');
+        rateInput.classList.toggle('sales-rate-in', st === 'ok' || st === 'warn');
+
+        if (statusEl) {
+            statusEl.classList.remove('sales-price-ok', 'sales-price-warn', 'sales-price-bad');
+            if (st === 'bad') {
+                statusEl.classList.add('sales-price-bad');
+                statusEl.textContent = `Out of range — must be ৳${fmtMoney(min)} – ৳${fmtMoney(max)}`;
+            } else if (st === 'warn') {
+                statusEl.classList.add('sales-price-warn');
+                statusEl.textContent = 'Near minimum — check margin';
+            } else {
+                statusEl.classList.add('sales-price-ok');
+                statusEl.textContent = 'Rate is within allowed range';
+            }
+        }
+
+        const thumb = document.getElementById('priceBandThumb');
+        if (thumb) {
+            thumb.style.borderColor = st === 'bad' ? '#dc2626' : (st === 'warn' ? '#b45309' : '#4f46e5');
+        }
+    }
+
+    function fmtMoney(n) {
+        return typeof salesFormatMoney === 'function'
+            ? salesFormatMoney(n)
+            : (parseFloat(n) || 0).toFixed(2);
+    }
+
+    function validateActiveRate() {
+        if (!activePriceRange) {
+            return { valid: false, message: 'No price range configured for this product.' };
+        }
+        const rate = parseFloat(document.getElementById('sales_rate')?.value) || 0;
+        if (typeof salesValidateRateClient === 'function') {
+            return salesValidateRateClient(rate, activePriceRange.min_rate, activePriceRange.max_rate);
+        }
+        if (rate < activePriceRange.min_rate || rate > activePriceRange.max_rate) {
+            return {
+                valid: false,
+                message: `Rate must be between ৳${fmtMoney(activePriceRange.min_rate)} and ৳${fmtMoney(activePriceRange.max_rate)}.`
+            };
+        }
+        return { valid: true };
     }
 
     function initCustomerTypeahead() {
@@ -177,14 +298,22 @@
             data.forEach(p => {
                 const stock = parseFloat(p.available_qty) || 0;
                 const out = stock <= 0;
-                html += `<button type="button" class="sales-suggest-item ${out ? 'disabled' : ''}" data-product='${JSON.stringify(p)}' ${out ? 'disabled' : ''}>
+                const min = parseFloat(p.min_rate) || 0;
+                const max = parseFloat(p.max_rate) || 0;
+                const priceLabel = min > 0 && max > 0
+                    ? `<span class="sales-suggest-price">${typeof salesFormatPriceRange === 'function' ? salesFormatPriceRange(min, max, p.default_rate) : ''}</span>`
+                    : `<span class="sales-suggest-price text-warning">No range</span>`;
+                html += `<button type="button" class="sales-suggest-item ${out ? 'disabled' : ''}" data-product='${JSON.stringify(p).replace(/'/g, '&#39;')}' ${out ? 'disabled' : ''}>
                     <span class="suggest-title">${escapeHtml(p.product_name)} <small class="text-muted">${escapeHtml(p.product_code || '')}</small></span>
-                    <span class="badge ${stock > 0 ? 'bg-success' : 'bg-danger'}">${stock} avail</span>
+                    <span class="d-flex align-items-center gap-1">
+                        ${priceLabel}
+                        <span class="badge ${stock > 0 ? 'bg-success' : 'bg-danger'}">${stock} avail</span>
+                    </span>
                 </button>`;
             });
             suggestionsBox.innerHTML = html || '<div class="sales-suggest-empty">No product found</div>';
             suggestionsBox.classList.add('show');
-        }, 280));
+        }, 200));
 
         suggestionsBox?.addEventListener('click', e => {
             const btn = e.target.closest('.sales-suggest-item:not(.disabled)');
@@ -192,12 +321,63 @@
             selectProductCreate(btn);
         });
 
-        productSearch.addEventListener('keydown', e => {
-            if (suggestionsBox.classList.contains('show') && e.key === 'Enter') {
-                e.preventDefault();
-                const first = suggestionsBox.querySelector('.sales-suggest-item:not(.disabled)');
-                if (first) selectProductCreate(first);
+        productSearch.addEventListener('keydown', async e => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                if (!suggestionsBox.classList.contains('show')) return;
+                const items = suggestionsBox.querySelectorAll('.sales-suggest-item:not(.disabled)');
+                if (!items.length) return;
+
+                let active = suggestionsBox.querySelector('.sales-suggest-item.active') || items[0];
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const next = active.nextElementSibling && active.nextElementSibling.classList.contains('sales-suggest-item')
+                        ? active.nextElementSibling
+                        : items[0];
+                    active.classList.remove('active');
+                    next.classList.add('active');
+                    next.scrollIntoView({ block: 'nearest' });
+                }
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prev = active.previousElementSibling && active.previousElementSibling.classList.contains('sales-suggest-item')
+                        ? active.previousElementSibling
+                        : items[items.length - 1];
+                    active.classList.remove('active');
+                    prev.classList.add('active');
+                    prev.scrollIntoView({ block: 'nearest' });
+                }
+                return;
             }
+
+            if (e.key !== 'Enter') return;
+
+            e.preventDefault();
+            const term = productSearch.value.trim();
+            if (!term) return;
+
+            const branchId = typeof getActiveSalesBranchId === 'function'
+                ? getActiveSalesBranchId()
+                : (document.getElementById('branch_id')?.value || window.SESSION_BRANCH_ID || '');
+
+            if (typeof fetchSalesProductByExactCode === 'function') {
+                const exact = await fetchSalesProductByExactCode(term, branchId);
+                if (exact) {
+                    selectProductCreate(exact);
+                    return;
+                }
+            }
+
+            if (suggestionsBox.classList.contains('show')) {
+                const items = suggestionsBox.querySelectorAll('.sales-suggest-item:not(.disabled)');
+                if (items.length) {
+                    const pick = suggestionsBox.querySelector('.sales-suggest-item.active:not(.disabled)') || items[0];
+                    if (pick) selectProductCreate(pick);
+                    return;
+                }
+            }
+
+            Swal.fire('Not found', 'No product with this code.', 'warning');
         });
 
         document.addEventListener('click', e => {
@@ -207,21 +387,34 @@
         });
     }
 
-    function selectProductCreate(btn) {
-        const p = JSON.parse(btn.dataset.product);
+    function selectProductCreate(btnOrProduct) {
+        const p = btnOrProduct && btnOrProduct.product_name != null && btnOrProduct.id != null
+            ? btnOrProduct
+            : JSON.parse(btnOrProduct.dataset.product.replace(/&#39;/g, "'"));
         const stock = parseFloat(p.available_qty) || 0;
         if (stock <= 0) {
             Swal.fire('Out of stock', 'No available stock at this branch.', 'warning');
             return;
         }
+
+        const min = parseFloat(p.min_rate) || 0;
+        const max = parseFloat(p.max_rate) || 0;
+        if (min <= 0 || max <= 0) {
+            Swal.fire('No price range', 'This product has no selling range set. Ask admin to configure prices.', 'warning');
+            return;
+        }
+
         selectedProduct = p;
+        setActivePriceRange(p);
         document.getElementById('productSearch').value = p.product_name;
-        document.getElementById('recommandedprice').textContent = parseFloat(p.price || 0).toFixed(2);
-        document.getElementById('sales_rate').value = p.price || 0;
+        const defRate = parseFloat(p.default_rate ?? p.price) || min;
+        document.getElementById('sales_rate').value = defRate;
         document.getElementById('quantity').value = 1;
         document.getElementById('productSuggestions')?.classList.remove('show');
+        updatePriceBandUi();
         showStockInfoCreate(p);
-        document.getElementById('addToCartBtn')?.focus();
+        document.getElementById('quantity')?.focus();
+        document.getElementById('quantity')?.select();
     }
 
     async function showStockInfoCreate(product) {
@@ -387,7 +580,15 @@
                 return;
             }
 
-            const formData = new FormData();
+            const rateCheck = validateActiveRate();
+            if (!rateCheck.valid) {
+                Swal.fire('Price out of range', rateCheck.message, 'warning');
+                document.getElementById('sales_rate')?.focus();
+                updatePriceBandUi();
+                return;
+            }
+
+            const formData = appendSalesCartContext(new FormData());
             formData.append('customer_id', customer_id);
             formData.append('product_id', selectedProduct.id);
             formData.append('product_name', selectedProduct.product_name);
@@ -403,14 +604,19 @@
                 resetProductEntry();
                 await refreshTabBadge(customer_id);
             } else {
-                Swal.fire('Error', result.message || 'Could not add', 'error');
+                if (typeof showCartValidationError === 'function') {
+                    showCartValidationError(result);
+                } else {
+                    Swal.fire('Error', result.message || 'Could not add', 'error');
+                }
             }
         });
 
         document.getElementById('quantity')?.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                btn.click();
+                document.getElementById('sales_rate')?.focus();
+                document.getElementById('sales_rate')?.select();
             }
         });
     }
@@ -419,8 +625,9 @@
         document.getElementById('productSearch').value = '';
         document.getElementById('quantity').value = 1;
         document.getElementById('sales_rate').value = '';
-        document.getElementById('recommandedprice').textContent = '0';
         selectedProduct = null;
+        activePriceRange = null;
+        document.getElementById('priceRangePanel')?.classList.add('d-none');
         document.getElementById('BranchStock')?.classList.add('d-none');
         document.getElementById('productSearch')?.focus();
     }
@@ -503,7 +710,7 @@
     }
 
     async function refreshTabBadge(customer_id) {
-        const fd = new FormData();
+        const fd = appendSalesCartContext(new FormData());
         fd.append('customer_id', customer_id);
         const res = await fetch(BASE_URL + 'sales/load_cart', salesPostOptions(appendCsrf(fd)));
         const data = await res.json();

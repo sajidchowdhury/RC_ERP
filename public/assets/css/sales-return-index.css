@@ -292,6 +292,83 @@
     font-size: 0.8rem;
 }
 
+/* Two-step journey indicator (index, create, confirm) */
+.sr-journey-steps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    margin-top: 0.65rem;
+}
+
+.sr-journey-steps--panel {
+    margin-top: 0;
+    padding: 0.65rem 0.75rem;
+    background: #fffafb;
+    border: 1px solid var(--sr-border);
+    border-radius: 12px;
+}
+
+.sr-journey-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.sr-journey-steps--hero .sr-journey-step {
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.sr-journey-steps--panel .sr-journey-step {
+    color: var(--sr-text);
+}
+
+.sr-journey-step.is-muted,
+.sr-journey-steps--panel .sr-journey-step.is-muted {
+    opacity: 0.55;
+}
+
+.sr-journey-step.is-active .sr-journey-num {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.sr-journey-steps--panel .sr-journey-step.is-active .sr-journey-num {
+    box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.25);
+}
+
+.sr-journey-step.is-done .sr-journey-num {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.sr-journey-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    font-size: 0.72rem;
+    font-weight: 800;
+    flex-shrink: 0;
+}
+
+.sr-journey-steps--panel .sr-journey-num {
+    background: linear-gradient(135deg, var(--sr-primary), var(--sr-accent));
+    color: #fff;
+}
+
+.sr-journey-arrow {
+    opacity: 0.65;
+    font-size: 0.65rem;
+}
+
+.sr-return-actions .btn-success {
+    font-weight: 600;
+}
+
 @media (max-width: 767.98px) {
     .sales-return-app .sales-dt-mobile-controls table.dataTable {
         display: none !important;

@@ -3,8 +3,16 @@
 // Centralized, secure authentication helper
 
 require_once __DIR__ . '/Database.php';
+require_once __DIR__ . '/RoleRegistry.php';
 
 class Auth {
+
+    // ===================== ROLE TIERS =====================
+    // Access tiers (stored in employees.role). Operational roles
+    // (salesman, manager, accountant, ...) are treated as regular users.
+    public const ROLE_SUPERADMIN = 'superadmin';
+    public const ROLE_ADMIN      = 'admin';
+    public const ROLE_USER       = 'user';
 
     /**
      * Perform secure login
@@ -33,7 +41,11 @@ class Auth {
         
 
         // Update last login in database (best effort)
-        self::updateLastLogin((int)$user['id']);
+        self::updateLastLogin(
+            (int)$user['id'],
+            $_SERVER['REMOTE_ADDR'] ?? null,
+            $_SERVER['HTTP_USER_AGENT'] ?? null
+        );
 
         // Optional: store minimal user object
         $_SESSION['user'] = [
@@ -42,20 +54,44 @@ class Auth {
             'role'          => $_SESSION['role'],
             'branch_id'     => $_SESSION['branch_id'],
         ];
+
+        require_once __DIR__ . '/InvestigationMode.php';
+        InvestigationMode::applySessionForUser($user);
+
+        // Stamp session after all login-side user row updates (last_login, lockout clear, rehash).
+        $version = self::fetchCredentialVersion((int)$user['id']);
+        if ($version !== null) {
+            $_SESSION['credential_version'] = $version;
+        } else {
+            $_SESSION['credential_version'] = '';
+        }
     }
 
     /**
-     * Update the last_login timestamp for the user
+     * Update last-login timestamp, IP, and user agent for the user.
      */
-    private static function updateLastLogin(int $userId): void
+    private static function updateLastLogin(int $userId, ?string $ip, ?string $userAgent): void
     {
         try {
+            $ip = $ip !== null ? mb_substr(trim($ip), 0, 45) : null;
+            $userAgent = $userAgent !== null
+                ? mb_substr(preg_replace('/[\r\n\t]/', ' ', trim($userAgent)), 0, 255)
+                : null;
+
             $db = new Database();
-            $db->query("UPDATE users SET last_login = NOW() WHERE id = :id");
+            $db->query('
+                UPDATE users
+                SET last_login = NOW(),
+                    last_login_ip = :ip,
+                    last_login_user_agent = :user_agent,
+                    updated_at = updated_at
+                WHERE id = :id
+            ');
+            $db->bind(':ip', $ip);
+            $db->bind(':user_agent', $userAgent);
             $db->bind(':id', $userId);
             $db->execute();
         } catch (Throwable $e) {
-            // Fail silently - last_login is nice-to-have, not critical
             error_log("Auth::updateLastLogin failed for user {$userId}: " . $e->getMessage());
         }
     }
@@ -65,6 +101,9 @@ class Auth {
      */
     public static function logout(): void
     {
+        require_once __DIR__ . '/RememberMe.php';
+        RememberMe::revokeCurrent();
+
         // Use centralized session destroyer
         require_once __DIR__ . '/Session.php';
         Session::destroy();
@@ -89,6 +128,63 @@ class Auth {
             header("Location: " . BASE_URL . "auth/login");
             exit;
         }
+
+        self::validateSessionCredential();
+    }
+
+    /**
+     * End session when account credentials changed (e.g. admin password reset).
+     */
+    public static function validateSessionCredential(): void
+    {
+        if (!self::isLoggedIn()) {
+            return;
+        }
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            return;
+        }
+
+        $stored = (string)($_SESSION['credential_version'] ?? '');
+        $current = self::fetchCredentialVersion($userId);
+
+        if ($current === null) {
+            self::invalidateSessionForCredentialChange();
+            return;
+        }
+
+        if ($stored === '') {
+            $_SESSION['credential_version'] = $current;
+            return;
+        }
+
+        if (!hash_equals($stored, $current)) {
+            self::invalidateSessionForCredentialChange();
+        }
+    }
+
+    private static function fetchCredentialVersion(int $userId): ?string
+    {
+        require_once __DIR__ . '/CredentialVersion.php';
+        return CredentialVersion::fetch($userId);
+    }
+
+    public static function invalidateSessionForCredentialChange(): void
+    {
+        require_once __DIR__ . '/RememberMe.php';
+        RememberMe::revokeCurrent();
+
+        require_once __DIR__ . '/Session.php';
+        Session::destroy();
+
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_start();
+        }
+
+        Flash::set('Your session ended because your account credentials were changed. Please sign in again.', 'warning');
+        header('Location: ' . BASE_URL . 'auth/login');
+        exit;
     }
 
     public static function getCurrentUser(): ?array
@@ -106,17 +202,88 @@ class Auth {
         return $_SESSION['role'] ?? null;
     }
 
+    public static function getEffectiveRole(): ?string
+    {
+        return self::getRole();
+    }
+
     public static function getBranchId(): ?int
     {
         return $_SESSION['branch_id'] ?? null;
     }
 
     /**
-     * Check if current user is admin (simple role check)
+     * True when a global investigation window is active for this admin/superadmin session.
+     */
+    public static function isSessionInvestigationRestricted(): bool
+    {
+        require_once __DIR__ . '/InvestigationMode.php';
+        return InvestigationMode::isSessionRestricted();
+    }
+
+    public static function isUnrestrictedSuperadmin(): bool
+    {
+        return self::getRole() === self::ROLE_SUPERADMIN;
+    }
+
+    /**
+     * Top access tier — full control, including company-critical actions.
+     */
+    public static function isSuperadmin(): bool
+    {
+        return self::getRole() === self::ROLE_SUPERADMIN;
+    }
+
+    /**
+     * Admin tier. Superadmin is always "admin-or-above", so it returns true
+     * here too. Use isUnrestrictedSuperadmin() for superadmin-only checks.
      */
     public static function isAdmin(): bool
     {
-        return self::getRole() === 'admin';
+        return in_array(self::getRole(), [self::ROLE_ADMIN, self::ROLE_SUPERADMIN], true);
+    }
+
+    public static function hasAdminRouteBypass(): bool
+    {
+        return self::isAdmin();
+    }
+
+    /**
+     * Require an admin-tier (admin or superadmin) user.
+     * Redirects regular users back to the dashboard with a flash message.
+     */
+    public static function requireAdmin(): void
+    {
+        self::requireLogin();
+        if (!self::isAdmin()) {
+            Flash::set("You do not have permission to access that area.", "error");
+            header("Location: " . BASE_URL . "dashboard");
+            exit;
+        }
+    }
+
+    /**
+     * Require a superadmin user (company-critical actions).
+     */
+    public static function requireSuperadmin(): void
+    {
+        self::requireLogin();
+        if (!self::isUnrestrictedSuperadmin()) {
+            Flash::set("That action requires super-admin privileges.", "error");
+            header("Location: " . BASE_URL . "dashboard");
+            exit;
+        }
+    }
+
+    /**
+     * Can the current user assign/grant a given role?
+     * - superadmin can be granted only by a superadmin
+     * - admin can be granted by an admin-tier user
+     * - any other role requires at least admin tier
+     */
+    public static function canAssignRole(string $role): bool
+    {
+        return RoleRegistry::canActorAssign($role);
     }
 
     public static function hasRole(string ...$roles): bool

@@ -38,6 +38,15 @@ class JournalEntryModel {
             return ['status' => 'error', 'message' => 'Debits and Credits must be equal'];
         }
 
+        require_once __DIR__ . '/../services/Accounting/AccountingPeriodService.php';
+        $periodError = AccountingPeriodService::validatePostingDate(
+            (string)($header['entry_date'] ?? date('Y-m-d')),
+            isset($header['branch_id']) ? (int)$header['branch_id'] : null
+        );
+        if ($periodError !== null) {
+            return ['status' => 'error', 'message' => $periodError];
+        }
+
         // Transaction management is handled by the caller (OtherExpenseModel, OtherIncomeModel, etc.).
         // We no longer call beginTransaction() here to avoid nested transaction errors.
 

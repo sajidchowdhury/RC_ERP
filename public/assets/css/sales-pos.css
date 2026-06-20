@@ -120,6 +120,12 @@
     background: #f8fafc;
 }
 
+.sales-suggest-item.active {
+    background: #eef2ff;
+    outline: 2px solid rgba(79, 70, 229, 0.35);
+    outline-offset: -2px;
+}
+
 .sales-suggest-item.disabled {
     opacity: 0.5;
 }
@@ -237,6 +243,190 @@
     font-size: 1.5rem;
     font-weight: 800;
     line-height: 1.1;
+}
+
+/* Price range band (min / default / max) */
+.sales-price-band {
+    background: #f8fafc;
+    border: 1px solid var(--sales-border);
+    border-radius: 12px;
+    padding: 0.75rem 0.85rem;
+    margin-bottom: 0.85rem;
+}
+
+.sales-price-band-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.sales-price-band-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--sales-muted);
+}
+
+.sales-price-band-title i {
+    color: var(--sales-primary);
+    margin-right: 0.25rem;
+}
+
+.sales-use-default-btn {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+}
+
+.sales-price-band-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: var(--sales-muted);
+    margin-bottom: 0.35rem;
+}
+
+.sales-price-band-labels b {
+    color: var(--sales-text);
+    font-size: 0.85rem;
+}
+
+.sales-price-band-default {
+    text-align: center;
+    color: var(--sales-primary);
+}
+
+.sales-price-band-default b {
+    color: var(--sales-primary);
+}
+
+.sales-price-band-track-wrap {
+    padding: 0.35rem 0 0.25rem;
+}
+
+.sales-price-band-track {
+    position: relative;
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 999px;
+    overflow: visible;
+}
+
+.sales-price-band-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, #22c55e, #4f46e5);
+    border-radius: 999px;
+    transition: width 0.15s ease;
+}
+
+.sales-price-band-default-mark {
+    position: absolute;
+    top: -3px;
+    width: 3px;
+    height: 14px;
+    background: var(--sales-primary);
+    border-radius: 2px;
+    transform: translateX(-50%);
+    opacity: 0.85;
+}
+
+.sales-price-band-thumb {
+    position: absolute;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border: 3px solid var(--sales-primary);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    transition: left 0.15s ease, border-color 0.15s ease;
+}
+
+.sales-price-band-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 0.45rem;
+}
+
+.sales-price-ok {
+    color: #15803d;
+}
+
+.sales-price-warn {
+    color: #b45309;
+}
+
+.sales-price-bad {
+    color: #dc2626;
+}
+
+.sales-entry-input.sales-rate-out {
+    border-color: #dc2626;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+
+.sales-entry-input.sales-rate-in {
+    border-color: #22c55e;
+}
+
+.sales-suggest-price {
+    font-size: 0.72rem;
+    color: var(--sales-muted);
+    white-space: nowrap;
+}
+
+.sales-rate-pill {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+}
+
+.sales-rate-pill-ok {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.sales-rate-pill-bad {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.sales-cart-line .sales-mobile-rate {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+}
+
+.sales-cart-line .sales-mobile-rate input {
+    width: 5.5rem;
+    min-height: 40px;
+    font-size: 15px;
+}
+
+.sales-cart-invalid-banner {
+    border-radius: 10px;
+    font-size: 0.85rem;
+}
+
+.sales-cart-invalid-banner ul {
+    margin-bottom: 0;
+}
+
+#posStickyFinalize:disabled,
+.finalSubmitBtn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .sales-entry-toolbar {

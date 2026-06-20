@@ -1,10 +1,13 @@
 <?php
 ob_start();
+require_once __DIR__ . '/../../../core/Auth.php';
 $title = $title ?? 'Workforce directory';
 $showDeleted = !empty($showDeleted);
 $branches = $branches ?? [];
 $roles = $roles ?? [];
 $stats = $stats ?? ['active' => 0, 'inactive' => 0, 'with_user' => 0, 'no_user' => 0];
+$isAdmin = Auth::isAdmin();
+$csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 $publicUrl = defined('PUBLIC_URL') ? rtrim(PUBLIC_URL, '/') : rtrim(BASE_URL, '/');
 $ajaxUrl = BASE_URL . 'employee' . ($showDeleted ? '?deleted=1' : '');
 ?>
@@ -23,8 +26,12 @@ $ajaxUrl = BASE_URL . 'employee' . ($showDeleted ? '?deleted=1' : '');
             <?php else: ?>
                 <a href="<?= BASE_URL ?>employee?deleted=1" class="btn btn-outline-light btn-sm"><i class="fas fa-trash me-1"></i> Deleted</a>
             <?php endif; ?>
-            <a href="<?= BASE_URL ?>employee/audit" class="btn btn-outline-light btn-sm"><i class="fas fa-clock-rotate-left me-1"></i> Audit</a>
+            <?php if ($isAdmin): ?>
+            <a href="<?= BASE_URL ?>user/security_audit" class="btn btn-outline-light btn-sm"><i class="fas fa-shield-halved me-1"></i> Security audit</a>
+            <?php if (!$showDeleted): ?>
             <a href="<?= BASE_URL ?>employee/create" class="btn btn-light btn-sm"><i class="fas fa-plus me-1"></i> New employee</a>
+            <?php endif; ?>
+            <?php endif; ?>
         </div>
     </header>
 
@@ -49,6 +56,7 @@ $ajaxUrl = BASE_URL . 'employee' . ($showDeleted ? '?deleted=1' : '');
     </div>
     <nav class="branch-hub-quick">
         <a href="<?= BASE_URL ?>user"><i class="fas fa-users-cog"></i> System users</a>
+        <a href="<?= BASE_URL ?>user/security_audit"><i class="fas fa-shield-halved"></i> Security audit</a>
         <a href="<?= BASE_URL ?>branch"><i class="fas fa-sitemap"></i> Branches</a>
         <a href="<?= BASE_URL ?>customer"><i class="fas fa-store"></i> Customers</a>
     </nav>
@@ -138,6 +146,8 @@ $ajaxUrl = BASE_URL . 'employee' . ($showDeleted ? '?deleted=1' : '');
 
 <script>
 const EMP_BASE = "<?= BASE_URL ?>employee";
+const EMP_CSRF = "<?= $csrfToken ?>";
+const EMP_IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>;
 const EMP_PUBLIC = "<?= htmlspecialchars($publicUrl, ENT_QUOTES) ?>";
 const EMP_SHOW_DELETED = <?= $showDeleted ? 'true' : 'false' ?>;
 
@@ -156,21 +166,24 @@ function empUserPill(row) {
 }
 function empNameCell(row) {
     const role = row.role ? '<span class="employee-role-pill">'+empEsc(row.role.replace(/_/g,' '))+'</span>' : '';
-    return '<div class="branch-name-cell"><div>'+empEsc(row.name)+'</div><div class="branch-contact d-lg-none">'+empEsc(row.mobile)+'</div><div class="mt-1">'+role+'</div></div>';
+    const name = empEsc(row.name);
+    const nameInner = EMP_IS_ADMIN
+        ? '<a href="'+EMP_BASE+'/account/'+row.id+'" class="emp-hub-name-link">'+name+'</a>'
+        : name;
+    return '<div class="branch-name-cell"><div>'+nameInner+'</div><div class="branch-contact d-lg-none">'+empEsc(row.mobile)+'</div><div class="mt-1">'+role+'</div></div>';
 }
 function empActions(row) {
     const id = row.id, name = (row.name||'').replace(/'/g,"\\'");
     let h = '<div class="branch-action-bar">';
     h += '<button type="button" class="btn-action" title="Quick view" onclick="viewEmployee('+id+')"><i class="fas fa-eye"></i></button>';
-    h += '<a href="'+EMP_BASE+'/edit/'+id+'" class="btn-action edit"><i class="fas fa-pen"></i></a>';
-    if (parseInt(row.has_user_account,10)>0 && row.user_id) {
-        h += '<a href="<?= BASE_URL ?>user/permission/'+row.user_id+'" class="btn-action" title="Permissions"><i class="fas fa-shield-halved"></i></a>';
-        h += '<a href="<?= BASE_URL ?>user/edit/'+row.user_id+'" class="btn-action edit" title="User"><i class="fas fa-user-shield"></i></a>';
-    } else {
+    if (!EMP_IS_ADMIN) return h + '</div>';
+    h += '<a href="'+EMP_BASE+'/account/'+id+'" class="btn-action" title="Employee &amp; account hub"><i class="fas fa-id-card-clip"></i></a>';
+    h += '<a href="'+EMP_BASE+'/edit/'+id+'" class="btn-action edit" title="Edit profile"><i class="fas fa-pen"></i></a>';
+    if (parseInt(row.has_user_account,10)<1) {
         h += '<a href="<?= BASE_URL ?>user/create?employee_id='+id+'" class="btn-action" title="Create user"><i class="fas fa-user-plus"></i></a>';
     }
     if (EMP_SHOW_DELETED) {
-        h += '<a href="'+EMP_BASE+'/restore/'+id+'" class="btn-action restore" onclick="return confirm(\'Restore?\')"><i class="fas fa-rotate-left"></i></a>';
+        h += '<button type="button" class="btn-action restore" onclick="restoreEmployee('+id+')" title="Restore"><i class="fas fa-rotate-left"></i></button>';
     } else {
         h += '<button type="button" class="btn-action toggle-off" onclick="toggleEmpStatus('+id+','+row.is_active+')"><i class="fas fa-power-off"></i></button>';
         h += '<button type="button" class="btn-action toggle-off" onclick="deleteEmployee('+id+',\''+name+'\')"><i class="fas fa-trash"></i></button>';
@@ -208,14 +221,48 @@ $(function() {
     window.employeeTable = table;
 });
 
+function reloadEmployeeTable() {
+    if (window.employeeTable) {
+        window.employeeTable.ajax.reload(null, false);
+        return;
+    }
+    location.reload();
+}
+function postEmployeeAction(url, successTitle) {
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        body: new URLSearchParams({ csrf_token: EMP_CSRF })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            Swal.fire({
+                title: successTitle || 'Done',
+                text: data.message,
+                icon: 'success',
+                timer: 1400,
+                showConfirmButton: false
+            }).then(reloadEmployeeTable);
+        } else {
+            Swal.fire('Action blocked', data.message || 'Request failed.', 'error');
+        }
+    })
+    .catch(() => Swal.fire('Error', 'Something went wrong. Please refresh and try again.', 'error'));
+}
 function toggleEmpStatus(id, isActive) {
     Swal.fire({ title: isActive ? 'Deactivate?' : 'Activate?', icon: 'warning', showCancelButton: true }).then(r => {
-        if (r.isConfirmed) location.href = EMP_BASE + '/toggle/' + id;
+        if (r.isConfirmed) postEmployeeAction(EMP_BASE + '/toggle/' + id, 'Status updated');
     });
 }
 function deleteEmployee(id, name) {
     Swal.fire({ title: 'Delete employee?', html: 'Soft delete <strong>'+name+'</strong>', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33' }).then(r => {
-        if (r.isConfirmed) location.href = EMP_BASE + '/delete/' + id;
+        if (r.isConfirmed) postEmployeeAction(EMP_BASE + '/delete/' + id, 'Employee deleted');
+    });
+}
+function restoreEmployee(id) {
+    Swal.fire({ title: 'Restore this employee?', icon: 'question', showCancelButton: true, confirmButtonText: 'Yes, restore' }).then(r => {
+        if (r.isConfirmed) postEmployeeAction(EMP_BASE + '/restore/' + id, 'Employee restored');
     });
 }
 function viewEmployee(id) {

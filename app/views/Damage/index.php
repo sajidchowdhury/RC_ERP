@@ -29,6 +29,9 @@ ob_start();
             <a href="<?= BASE_URL ?>Damage/create" class="btn btn-light btn-sm">
                 <i class="fas fa-plus me-1"></i> Record damage
             </a>
+            <a href="<?= BASE_URL ?>SalesReturn" class="btn btn-outline-light btn-sm" title="Damaged returns auto-create linked write-offs on confirm">
+                <i class="fas fa-undo-alt me-1"></i> Sales returns
+            </a>
             <button type="button" class="btn btn-outline-light btn-sm collapsed" data-bs-toggle="collapse" data-bs-target="#dmgFiltersCollapse">
                 <i class="fas fa-filter me-1"></i> Filters
             </button>
@@ -73,6 +76,14 @@ ob_start();
                             <option value="reversed" <?= ($filters['status'] ?? '') === 'reversed' ? 'selected' : '' ?>>Reversed</option>
                         </select>
                     </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label small mb-1">Source</label>
+                        <select name="source" class="form-select form-select-sm">
+                            <option value="all">All</option>
+                            <option value="return" <?= ($filters['source'] ?? '') === 'return' ? 'selected' : '' ?>>From sales return</option>
+                            <option value="manual" <?= ($filters['source'] ?? '') === 'manual' ? 'selected' : '' ?>>Manual only</option>
+                        </select>
+                    </div>
                     <div class="col-12 col-md-3 d-flex gap-2">
                         <button type="submit" class="btn btn-primary btn-sm flex-fill"><i class="fas fa-search me-1"></i> Search</button>
                         <a href="<?= BASE_URL ?>Damage" class="btn btn-outline-secondary btn-sm">Reset</a>
@@ -91,6 +102,7 @@ ob_start();
                         <th>Date</th>
                         <th>Code</th>
                         <th>Warehouse</th>
+                        <th>Source</th>
                         <th class="text-end">Damage amount</th>
                         <th>GL</th>
                         <th>Status</th>
@@ -99,7 +111,7 @@ ob_start();
                 </thead>
                 <tbody>
                 <?php if (empty($damages)): ?>
-                    <tr><td colspan="7" class="text-center text-muted py-4">No damage records in this period</td></tr>
+                    <tr><td colspan="8" class="text-center text-muted py-4">No damage records in this period</td></tr>
                 <?php else: ?>
                     <?php foreach ($damages as $d):
                         $rev = !empty($d['is_reversed']);
@@ -112,6 +124,15 @@ ob_start();
                             </a>
                         </td>
                         <td class="small"><?= htmlspecialchars($d['warehouse_name'] ?? '', ENT_QUOTES) ?></td>
+                        <td class="small">
+                            <?php if (!empty($d['sales_return_id'])): ?>
+                            <a href="<?= BASE_URL ?>SalesReturn/slip/<?= (int)$d['sales_return_id'] ?>" class="text-decoration-none" target="_blank" rel="noopener" title="Sales return slip">
+                                <i class="fas fa-undo-alt me-1"></i><?= htmlspecialchars($d['sales_return_code'] ?? 'Return', ENT_QUOTES) ?>
+                            </a>
+                            <?php else: ?>
+                            <span class="text-muted">Manual</span>
+                            <?php endif; ?>
+                        </td>
                         <td class="text-end fw-semibold text-danger"><?= number_format((float)($d['total_value'] ?? 0), 2) ?></td>
                         <td><?= !empty($d['journal_entry_id']) ? '<span class="badge bg-success">Yes</span>' : '<span class="text-muted">—</span>' ?></td>
                         <td><span class="badge-status <?= $rev ? 'reversed' : 'damaged' ?>"><?= $rev ? 'reversed' : 'active' ?></span></td>

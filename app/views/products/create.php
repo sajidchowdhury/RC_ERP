@@ -23,7 +23,7 @@ $publicUrl = $publicUrl ?? BASE_URL;
     <div class="branch-form-layout has-aside">
         <div class="branch-form-panel">
             <form method="POST" action="<?= BASE_URL ?>product/store" enctype="multipart/form-data">
-                <?php $product = []; $isEdit = false; require __DIR__ . '/_form_fields.php'; ?>
+                <?php $product = ['group_id' => $defaultGroupId ?? 1]; $isEdit = false; require __DIR__ . '/_form_fields.php'; ?>
                 <div class="branch-form-footer">
                     <button type="submit" class="btn btn-primary px-4"><i class="fas fa-check me-1"></i> Save product</button>
                     <a href="<?= BASE_URL ?>product" class="btn btn-outline-secondary">Cancel</a>
@@ -39,7 +39,7 @@ $publicUrl = $publicUrl ?? BASE_URL;
                 <div class="mt-2 small text-muted" id="previewMeta">Pcs · No category</div>
             </div>
             <div class="branch-aside-tip">
-                <i class="fas fa-tag me-1"></i> After creating, open <strong>Price history</strong> to set the selling rate used on invoices.
+                <i class="fas fa-tag me-1"></i> After creating, open <strong>Price history</strong> to set min / max / default selling rates.
             </div>
         </aside>
     </div>
@@ -49,17 +49,20 @@ $publicUrl = $publicUrl ?? BASE_URL;
     const name = document.getElementById('product_name');
     const unit = document.getElementById('unit');
     const cat = document.getElementById('category_id');
+    const grp = document.getElementById('group_id');
     function upd() {
         const n = (name?.value || '').trim();
         document.getElementById('previewName').textContent = n || 'Product name';
         document.getElementById('previewAvatar').innerHTML = n ? n.charAt(0).toUpperCase() : '<i class="fas fa-box"></i>';
         const u = unit?.value || 'Pcs';
         const c = cat?.selectedOptions?.[0]?.text?.trim() || 'No category';
-        document.getElementById('previewMeta').textContent = u + ' · ' + c;
+        const g = grp?.selectedOptions?.[0]?.text?.trim() || 'China';
+        document.getElementById('previewMeta').textContent = u + ' · ' + g + ' · ' + c;
     }
     name?.addEventListener('input', upd);
     unit?.addEventListener('change', upd);
     cat?.addEventListener('change', upd);
+    grp?.addEventListener('change', upd);
 })();
 </script>
 <?php

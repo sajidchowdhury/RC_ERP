@@ -1,8 +1,17 @@
 <?php
 // Creative fixed footer — click opens drop-up quick tools
+require_once __DIR__ . '/../../../core/Auth.php';
+require_once __DIR__ . '/../../../core/InvestigationMode.php';
+
+$showInvestigationIcon = Auth::isLoggedIn() && InvestigationMode::isGloballyActive();
 ?>
 <div class="mt-5"></div>
-<div class="creative-footer" id="creativeFooter">
+<div class="creative-footer<?= $showInvestigationIcon ? ' has-investigation-icon' : '' ?>" id="creativeFooter">
+    <?php if ($showInvestigationIcon): ?>
+    <span class="footer-investigation-icon" title="Investigation mode active">
+        <i class="fas fa-user-secret" aria-hidden="true"></i>
+    </span>
+    <?php endif; ?>
     <button
         type="button"
         class="footer-dropup-trigger"
@@ -44,6 +53,25 @@
                 <span class="footer-dropup-link-text">
                     <strong>Sales Guideline</strong>
                     <small>End-user guide for the sales ecosystem</small>
+                </span>
+                <i class="fas fa-arrow-right footer-dropup-link-arrow"></i>
+            </a>
+
+            <a href="<?= BASE_URL ?>Accounting/guide" class="footer-dropup-link mt-2">
+                <span class="footer-dropup-link-icon"><i class="fas fa-clipboard-check"></i></span>
+                <span class="footer-dropup-link-text">
+                    <strong>Account Guideline</strong>
+                    <small>End-user guide for the Account ecosystem</small>
+                </span>
+                <i class="fas fa-arrow-right footer-dropup-link-arrow"></i>
+            </a>
+
+
+            <a href="<?= BASE_URL ?>sales/go_live_checklist" class="footer-dropup-link">
+                <span class="footer-dropup-link-icon"><i class="fas fa-rocket"></i></span>
+                <span class="footer-dropup-link-text">
+                    <strong>Sales Go-Live Checklist</strong>
+                    <small>Stock, GL, cron, reversals — launch sign-off</small>
                 </span>
                 <i class="fas fa-arrow-right footer-dropup-link-arrow"></i>
             </a>

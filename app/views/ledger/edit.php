@@ -2,11 +2,12 @@
 ob_start();
 $title = $title ?? 'Edit ledger';
 $ledger = $ledger ?? [];
-$ledgers = $ledgers ?? [];
+$parentOptions = $parentOptions ?? [];
 $usage = $usage ?? ['journal_lines' => 0, 'children' => 0, 'is_active' => true, 'is_system' => false];
 $isSystem = !empty($isSystem);
 $ledgerId = (int)($ledger['id'] ?? 0);
 $isActive = !empty($ledger['is_active']);
+$currentNature = (string)($ledger['ledger_nature'] ?? '');
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/ledger-theme.css">
@@ -22,6 +23,7 @@ $isActive = !empty($ledger['is_active']);
             </span>
         </div>
         <div class="branch-hub-actions">
+            <a href="<?= BASE_URL ?>ledger/show/<?= $ledgerId ?>" class="btn btn-outline-light btn-sm"><i class="fas fa-book-open me-1"></i> Hub</a>
             <a href="<?= BASE_URL ?>ledger" class="btn btn-outline-light btn-sm"><i class="fas fa-arrow-left me-1"></i> Back</a>
             <a href="<?= BASE_URL ?>ledger/audit" class="btn btn-outline-light btn-sm"><i class="fas fa-clock-rotate-left me-1"></i> Audit</a>
         </div>
@@ -80,60 +82,10 @@ $isActive = !empty($ledger['is_active']);
                                         <label class="form-label fw-medium">Ledger Nature</label>
                                         <select name="ledger_nature" class="form-select" <?= !empty($isSystem) ? 'disabled' : '' ?>>
                                             <option value="">— Select Nature —</option>
-
-                                            <!-- Control & Sub-Ledger -->
-                                            <optgroup label="Control & Sub-Ledger Accounts">
-                                                <option value="cash_bank">Cash & Bank</option>
-                                                <option value="customer_receivable">Customer Receivable (AR)</option>
-                                                <option value="supplier_payable">Supplier Payable (AP)</option>
-                                                <option value="employee_payable">Employee Payable / Receivable</option>
-                                            </optgroup>
-
-                                            <!-- Revenue -->
-                                            <optgroup label="Revenue">
-                                                <option value="sales_revenue">Sales Revenue</option>
-                                                <option value="other_income">Other Income</option>
-                                                <option value="sales_return">Sales Returns & Allowances</option>
-                                            </optgroup>
-
-                                            <!-- Cost of Sales -->
-                                            <optgroup label="Cost of Sales">
-                                                <option value="inventory">Inventory / Stock</option>
-                                                <option value="cogs">Cost of Goods Sold (COGS)</option>
-                                            </optgroup>
-
-                                            <!-- Expenses -->
-                                            <optgroup label="Expenses">
-                                                <option value="operating_expense">Operating / Administrative Expense</option>
-                                                <option value="payroll_expense">Payroll & Salaries</option>
-                                                <option value="depreciation">Depreciation & Amortization</option>
-                                                <option value="financial_expense">Financial Expense (Interest, Bank Charges)</option>
-                                            </optgroup>
-
-                                            <!-- Tax -->
-                                            <optgroup label="Tax & Statutory">
-                                                <option value="tax_payable">Tax Payable (VAT/GST Output)</option>
-                                                <option value="tax_receivable">Tax Receivable (Input VAT)</option>
-                                            </optgroup>
-
-                                            <!-- Balance Sheet Specific -->
-                                            <optgroup label="Balance Sheet Specific">
-                                                <option value="fixed_asset">Fixed Assets (PPE)</option>
-                                                <option value="accumulated_depreciation">Accumulated Depreciation</option>
-                                                <option value="prepaid_expense">Prepaid Expenses</option>
-                                                <option value="accrued_expense">Accrued Expenses / Liabilities</option>
-                                                <option value="long_term_liability">Long Term Liability</option>
-                                                <option value="owner_equity">Owner's Capital / Equity</option>
-                                                <option value="retained_earnings">Retained Earnings</option>
-                                                <option value="drawings">Owner's Drawings</option>
-                                            </optgroup>
-
-                                            <!-- General -->
-                                            <optgroup label="General">
-                                                <option value="other_asset">Other Asset</option>
-                                                <option value="other_liability">Other Liability</option>
-                                                <option value="manual_adjustment">Manual Journal Adjustment</option>
-                                            </optgroup>
+                                            <?php
+                                            $selectedNature = $currentNature;
+                                            require __DIR__ . '/_nature_options.php';
+                                            ?>
                                         </select>
                                         <?php if (!empty($isSystem)): ?>
                                             <input type="hidden" name="ledger_nature" value="<?= htmlspecialchars($ledger['ledger_nature'] ?? '') ?>">
@@ -217,14 +169,10 @@ $isActive = !empty($ledger['is_active']);
                             <div class="col-md-6">
                                 <label class="form-label fw-medium">Parent Ledger</label>
                                 <select name="parent_id" class="form-select" <?= !empty($isSystem) ? 'disabled' : '' ?>>
-                                    <option value="0">— None (Top Level) —</option>
-                                    <?php foreach ($ledgers as $l): ?>
-                                        <?php if ($l['id'] != $ledger['id']): ?>
-                                            <option value="<?= $l['id'] ?>" <?= ($l['id'] == $ledger['parent_id']) ? 'selected' : '' ?>>
-                                                <?= htmlspecialchars($l['ledger_name']) ?>
-                                            </option>
-                                        <?php endif; ?>
-                                    <?php endforeach; ?>
+                                    <?php
+                                    $selectedParentId = (int)($ledger['parent_id'] ?? 0);
+                                    require __DIR__ . '/_parent_options.php';
+                                    ?>
                                 </select>
                                 <?php if (!empty($isSystem)): ?>
                                     <input type="hidden" name="parent_id" value="<?= (int)($ledger['parent_id'] ?? 0) ?>">
@@ -234,7 +182,11 @@ $isActive = !empty($ledger['is_active']);
 
                             <div class="col-md-3">
                                 <label class="form-label fw-medium">Sort Order</label>
-                                <input type="number" name="sort_order" class="form-control" value="<?= (int)($ledger['sort_order'] ?? 0) ?>">
+                                <input type="number" name="sort_order" class="form-control" value="<?= (int)($ledger['sort_order'] ?? 0) ?>"
+                                    <?= !empty($isSystem) ? 'readonly' : '' ?>>
+                                <?php if (!empty($isSystem)): ?>
+                                    <div class="form-text text-muted small">Protected on system ledgers</div>
+                                <?php endif; ?>
                             </div>
 
                             <div class="col-md-3">
@@ -270,15 +222,16 @@ $isActive = !empty($ledger['is_active']);
 
                 <div class="branch-form-footer">
                     <?php if ($isSystem): ?>
-                        <button type="button" class="btn btn-secondary" disabled>
-                            <i class="fas fa-lock me-1"></i> Protected — cannot update
+                        <button type="submit" class="btn btn-primary px-4">
+                            <i class="fas fa-save me-1"></i> Save description
                         </button>
+                        <span class="text-muted small ms-2 align-self-center">Critical fields remain locked.</span>
                     <?php else: ?>
                         <button type="submit" class="btn btn-primary px-4">
                             <i class="fas fa-save me-1"></i> Save changes
                         </button>
                     <?php endif; ?>
-                    <a href="<?= BASE_URL ?>ledger" class="btn btn-outline-secondary">Cancel</a>
+                    <a href="<?= BASE_URL ?>ledger/show/<?= $ledgerId ?>" class="btn btn-outline-secondary">Cancel</a>
                 </div>
 
             </form>

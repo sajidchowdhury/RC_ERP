@@ -3,6 +3,7 @@
 
 require_once '../core/BaseController.php';
 require_once '../app/models/CustomerTransactionModel.php';
+require_once '../app/services/Accounting/JournalPostingService.php';
 
 require_once '../app/helpers/Helper.php';
 require_once '../core/UserAudit.php';
@@ -19,10 +20,45 @@ class CustomerTransactionController extends BaseController {
     }
 
     public function index() {
-        $branchId = Helper::sessionBranchId() ?: (int)($_SESSION['branch_id'] ?? 0);
+        if (isset($_GET['draw'])) {
+            $filters = $this->resolveIndexFilters();
+            $response = $this->model->getPaymentsForDataTable(
+                $_GET,
+                $filters,
+                $this->resolveListBranchId()
+            );
+            header('Content-Type: application/json');
+            echo json_encode($response);
+            exit;
+        }
+
+        $filters = $this->resolveIndexFilters();
+        $listBranchId = $this->resolveListBranchId();
+        $showReversed = isset($_GET['reversed']) && $_GET['reversed'] == '1';
+
+        $filterCustomer = null;
+        $customerId = (int)($filters['customer_id'] ?? 0);
+        if ($customerId > 0) {
+            $filterCustomer = $this->model->Get_Customer_By_Id($customerId);
+        }
+
+        $this->view('Accounting/customer/index', [
+            'title'          => $showReversed ? 'Reversed customer payments' : 'Customer payments',
+            'branch_name'    => $_SESSION['branch_name'] ?? 'Branch',
+            'filters'        => $filters,
+            'filterCustomer' => $filterCustomer,
+            'stats'          => $this->model->getCustomerTransactionIndexStats($listBranchId),
+            'showReversed'   => $showReversed,
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveIndexFilters(): array
+    {
         $today = date('Y-m-d');
 
-        // First visit / Reset: show today only. Explicit empty dates on search → today as well.
         if (!isset($_GET['date_from']) && !isset($_GET['date_to'])) {
             $dateFrom = $today;
             $dateTo = $today;
@@ -35,41 +71,55 @@ class CustomerTransactionController extends BaseController {
             }
         }
 
-        $filters = [
+        $customerId = trim((string)($_GET['customer_id'] ?? ''));
+
+        return [
             'date_from'        => $dateFrom,
             'date_to'          => $dateTo,
             'transaction_type' => $_GET['transaction_type'] ?? 'all',
             'status'           => $_GET['status'] ?? 'all',
             'payment_mode'     => $_GET['payment_mode'] ?? 'all',
-            'customer_id'      => $_GET['customer_id'] ?? null,
+            'customer_id'      => $customerId !== '' ? (int)$customerId : null,
         ];
+    }
 
-        $listBranchId = ($this->model->canOverrideBranch() && $branchId <= 0) ? null : ($branchId ?: null);
-        $transactions = $this->model->getFilteredTransactions($filters, $listBranchId);
+    private function resolveListBranchId(): ?int
+    {
+        $branchId = Helper::sessionBranchId() ?: (int)($_SESSION['branch_id'] ?? 0);
 
-        foreach ($transactions as &$row) {
-            $row['can_reverse'] = empty($row['is_reversed']);
+        return ($this->model->canOverrideBranch() && $branchId <= 0) ? null : ($branchId ?: null);
+    }
+
+    public function search_customer() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            $this->sendJson(['status' => 'error', 'message' => 'Invalid request'], 405);
+            return;
         }
-        unset($row);
 
-        $this->view('Accounting/customer/index', [
-            'title'         => 'Customer payments',
-            'transactions'  => $transactions,
-            'branch_name'   => $_SESSION['branch_name'] ?? 'Branch',
-            'filters'       => $filters,
-            'stats'         => $this->model->getCustomerTransactionIndexStats($listBranchId),
-            'customers'     => $this->model->getCustomers(),
-        ]);
+        $term = trim((string)($_GET['term'] ?? ''));
+        $this->sendJson($this->model->Search_Customers($term));
     }
 
     public function create() {
+        $preselectCustomer = null;
+        $preselectId = (int)($_GET['customer_id'] ?? 0);
+        if ($preselectId > 0) {
+            $row = $this->model->Get_Customer_By_Id($preselectId);
+            if ($row && !empty($row['is_active'])) {
+                $preselectCustomer = $row;
+            }
+        }
+
+        $posting = new JournalPostingService();
+
         $this->view('Accounting/customer/create', [
-            'title'     => 'New customer payment',
-            'customers' => $this->model->getCustomers(),
-            'banks'     => $this->model->getBanks(),
-            'employees' => $this->model->getEmployeesForUser(),
-            'today'     => date('Y-m-d'),
-            'branch_name' => $_SESSION['branch_name'] ?? 'Branch',
+            'title'             => 'New customer payment',
+            'preselectCustomer' => $preselectCustomer,
+            'banks'             => $this->model->getBanks(),
+            'employees'         => $this->model->getEmployeesForUser(),
+            'today'             => date('Y-m-d'),
+            'branch_name'       => $_SESSION['branch_name'] ?? 'Branch',
+            'gl_preview_labels' => $posting->getCustomerTransactionGlPreviewLabels(),
         ]);
     }
 
@@ -194,6 +244,13 @@ class CustomerTransactionController extends BaseController {
             'settlements'  => $this->model->getPaymentSettlements($paymentId),
             'customer_due' => $this->model->getCustomerDue((int)$transaction['customer_id']),
             'can_reverse'  => $this->model->canUserReversePayment($transaction),
+        ]);
+    }
+
+    public function audit() {
+        $this->view('Accounting/customer/audit', [
+            'title' => 'Customer Payment Audit Logs',
+            'logs'  => $this->userAudit->getRecentLogs(300, 'customer_payment_'),
         ]);
     }
 }

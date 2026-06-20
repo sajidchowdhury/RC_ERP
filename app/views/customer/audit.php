@@ -1,19 +1,19 @@
 <?php
 ob_start();
+require_once __DIR__ . '/../../helpers/MasterDataAuditHelper.php';
+
 $title = $title ?? 'Customer Audit Logs';
 $logs = $logs ?? [];
 
-$countCreated = $countUpdated = $countStatus = $countDeactivate = 0;
+$countCreated = $countUpdated = $countStatus = 0;
 foreach ($logs as $log) {
     $action = (string)($log['action'] ?? '');
     if (str_contains($action, 'created')) {
         $countCreated++;
     } elseif (str_contains($action, 'updated')) {
         $countUpdated++;
-    } elseif (str_contains($action, 'status')) {
+    } elseif (str_contains($action, 'status') || str_contains($action, 'deactivated') || str_contains($action, 'restored')) {
         $countStatus++;
-    } elseif (str_contains($action, 'deactivated') || str_contains($action, 'restored')) {
-        $countDeactivate++;
     }
 }
 
@@ -42,30 +42,6 @@ function customerAuditActionLabel(string $action): string
         default => $action,
     };
 }
-
-function customerAuditFormatDetails($details): string
-{
-    if (empty($details) || !is_array($details)) {
-        return '<span class="text-muted">—</span>';
-    }
-
-    $parts = [];
-    if (!empty($details['shop_name'])) {
-        $parts[] = '<strong>Shop:</strong> ' . htmlspecialchars((string)$details['shop_name'], ENT_QUOTES);
-    }
-    if (!empty($details['customer_name'])) {
-        $parts[] = '<strong>Contact:</strong> ' . htmlspecialchars((string)$details['customer_name'], ENT_QUOTES);
-    }
-    if (!empty($details['new_status'])) {
-        $parts[] = '<strong>Status:</strong> ' . htmlspecialchars((string)$details['new_status'], ENT_QUOTES);
-    }
-    if (empty($parts)) {
-        $json = json_encode($details, JSON_UNESCAPED_UNICODE);
-        return '<span class="branch-audit-details">' . htmlspecialchars($json ?: '', ENT_QUOTES) . '</span>';
-    }
-
-    return '<div class="branch-audit-details">' . implode(' · ', $parts) . '</div>';
-}
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/customer-theme.css">
@@ -90,7 +66,7 @@ function customerAuditFormatDetails($details): string
         <span class="branch-audit-chip"><i class="fas fa-list"></i> <?= count($logs) ?> entries</span>
         <span class="branch-audit-chip created"><i class="fas fa-plus"></i> <?= $countCreated ?> created</span>
         <span class="branch-audit-chip updated"><i class="fas fa-pen"></i> <?= $countUpdated ?> updated</span>
-        <span class="branch-audit-chip status"><i class="fas fa-toggle-on"></i> <?= $countStatus + $countDeactivate ?> status</span>
+        <span class="branch-audit-chip status"><i class="fas fa-toggle-on"></i> <?= $countStatus ?> status</span>
     </div>
 
     <div class="branch-hub-panel branch-audit-panel">
@@ -123,18 +99,22 @@ function customerAuditFormatDetails($details): string
                         ?>
                         <tr>
                             <td><small class="text-nowrap"><?= htmlspecialchars($log['timestamp'] ?? '', ENT_QUOTES) ?></small></td>
-                            <td>
-                                <span class="badge rounded-pill bg-light text-dark border">
-                                    #<?= (int)($log['performed_by'] ?? 0) ?>
-                                </span>
-                            </td>
+                            <td><?= htmlspecialchars($log['performed_by_name'] ?? ('#' . (int)($log['performed_by'] ?? 0)), ENT_QUOTES) ?></td>
                             <td>
                                 <span class="branch-audit-action <?= $actionClass ?>">
                                     <?= htmlspecialchars(customerAuditActionLabel($action), ENT_QUOTES) ?>
                                 </span>
                             </td>
-                            <td><strong><?= htmlspecialchars((string)$targetId, ENT_QUOTES) ?></strong></td>
-                            <td><?= customerAuditFormatDetails($log['details'] ?? []) ?></td>
+                            <td>
+                                <?php if (is_numeric($targetId) && (int)$targetId > 0): ?>
+                                <a href="<?= BASE_URL ?>customer/show/<?= (int)$targetId ?>" class="fw-semibold text-decoration-none">
+                                    #<?= (int)$targetId ?>
+                                </a>
+                                <?php else: ?>
+                                <strong><?= htmlspecialchars((string)$targetId, ENT_QUOTES) ?></strong>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= MasterDataAuditHelper::renderDetailsHtml($log['details'] ?? []) ?></td>
                             <td><small class="text-muted"><?= htmlspecialchars($log['ip'] ?? 'unknown', ENT_QUOTES) ?></small></td>
                         </tr>
                     <?php endforeach; ?>

@@ -58,6 +58,9 @@ $isActive = !empty($employee['is_active']);
             </div>
             <?php if (!empty($usage['has_user_account']) && !empty($usage['user_id'])): ?>
             <div class="mt-3 d-grid gap-2">
+                <a href="<?= BASE_URL ?>employee/account/<?= $employeeId ?>" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-id-card-clip me-1"></i> Employee &amp; account
+                </a>
                 <a href="<?= BASE_URL ?>user/edit/<?= (int)$usage['user_id'] ?>" class="btn btn-sm btn-outline-secondary">
                     <i class="fas fa-user-shield me-1"></i> Edit login
                 </a>
@@ -66,8 +69,11 @@ $isActive = !empty($employee['is_active']);
                 </a>
             </div>
             <?php else: ?>
-            <div class="mt-3">
-                <a href="<?= BASE_URL ?>user/create?employee_id=<?= $employeeId ?>" class="btn btn-sm btn-primary w-100">
+            <div class="mt-3 d-grid gap-2">
+                <a href="<?= BASE_URL ?>employee/account/<?= $employeeId ?>" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-id-card-clip me-1"></i> Employee &amp; account
+                </a>
+                <a href="<?= BASE_URL ?>user/create?employee_id=<?= $employeeId ?>" class="btn btn-sm btn-primary">
                     <i class="fas fa-user-plus me-1"></i> Create login
                 </a>
             </div>

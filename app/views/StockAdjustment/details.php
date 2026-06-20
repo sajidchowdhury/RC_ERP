@@ -2,7 +2,7 @@
 $adjustment = $adjustment ?? [];
 $items = $items ?? [];
 $movements = $movements ?? [];
-$journalEntry = $journal_entry ?? null;
+$journal_blocks = $journal_blocks ?? [];
 $adjustmentAudit = $adjustment_audit ?? [];
 $auditItems = $adjustmentAudit['items'] ?? [];
 $auditSummary = $adjustmentAudit['summary'] ?? [];
@@ -27,6 +27,7 @@ ob_start();
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/purchase-audit-checklist.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/stock-take.css">
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/stock-adjustment.css">
+<link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
 
 <div class="purch-index-app st-take-app sa-adjust-app container-fluid py-2" id="stockAdjustmentDetails">
     <header class="purch-index-hero sa-hero">
@@ -145,43 +146,7 @@ ob_start();
         </div>
     </section>
 
-    <?php if (!empty($journalEntry)): ?>
-    <section class="st-section-card mb-3">
-        <div class="st-section-head"><i class="fas fa-book me-1"></i> General ledger</div>
-        <div class="p-3">
-            <p class="mb-2 small">
-                <strong><?= htmlspecialchars($journalEntry['entry_no'] ?? '', ENT_QUOTES) ?></strong>
-                — <?= !empty($journalEntry['entry_date']) ? date('d M Y', strtotime($journalEntry['entry_date'])) : '' ?>
-                <?php if (!empty($journalEntry['is_reversed'])): ?>
-                <span class="badge bg-danger ms-1">Journal reversed</span>
-                <?php endif; ?>
-            </p>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0">
-                    <thead class="table-light">
-                        <tr><th>Ledger</th><th class="text-end">Debit</th><th class="text-end">Credit</th></tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($journalEntry['lines'] ?? [] as $jl): ?>
-                        <tr>
-                            <td><?= htmlspecialchars($jl['ledger_name'] ?? '', ENT_QUOTES) ?></td>
-                            <td class="text-end"><?= (float)($jl['debit'] ?? 0) > 0 ? number_format((float)$jl['debit'], 2) : '—' ?></td>
-                            <td class="text-end"><?= (float)($jl['credit'] ?? 0) > 0 ? number_format((float)$jl['credit'], 2) : '—' ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                    <tfoot class="table-light">
-                        <tr>
-                            <th>Total</th>
-                            <th class="text-end"><?= number_format((float)($journalEntry['total_debit'] ?? 0), 2) ?></th>
-                            <th class="text-end"><?= number_format((float)($journalEntry['total_credit'] ?? 0), 2) ?></th>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        </div>
-    </section>
-    <?php endif; ?>
+    <?php include __DIR__ . '/../partials/sales_gl_journal_blocks.php'; ?>
 
     <section class="st-section-card">
         <div class="st-section-head">Stock movements</div>

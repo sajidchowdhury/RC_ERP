@@ -216,6 +216,26 @@ $invoiceStub = [
             </div>
             <?php endif; ?>
 
+            <?php
+            $linkedDamages = $return['linked_damages'] ?? [];
+            if ($isLastPage && !empty($linkedDamages)):
+            ?>
+            <div class="sr-slip-linked-damage no-print" style="margin:0.75rem 0;padding:0.5rem 0.75rem;border:1px dashed #dc2626;border-radius:6px;font-size:0.85rem;">
+                <strong><i class="fas fa-heart-crack me-1"></i>Linked damage write-off</strong>
+                <ul class="mb-0 mt-1 ps-3">
+                    <?php foreach ($linkedDamages as $dmg): ?>
+                    <li>
+                        <a href="<?= BASE_URL ?>Damage/details/<?= (int)($dmg['id'] ?? 0) ?>" target="_blank" rel="noopener">
+                            <?= htmlspecialchars($dmg['damage_code'] ?? '', ENT_QUOTES) ?>
+                        </a>
+                        — <?= htmlspecialchars($dmg['warehouse_name'] ?? '', ENT_QUOTES) ?>
+                        (<?= number_format((float)($dmg['total_value'] ?? 0), 2) ?>)
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+            <?php endif; ?>
+
             <div class="sr-slip-meta-row">
                 <?php if ($isCompleted && !empty($return['confirmed_at'])): ?>
                 <span><i class="fas fa-check-circle"></i> Confirmed: <?= $formatDateTime($return['confirmed_at']) ?></span>

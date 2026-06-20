@@ -360,9 +360,35 @@ public function createReturn($data, $items) {
             ");
             $this->db->bind(':return_id', $id);
             $return['items'] = $this->db->resultSet();
+            $return['linked_damages'] = $this->getLinkedDamageInvoices($id);
         }
 
         return $return;
+    }
+
+    /**
+     * Damage write-offs auto-created from a confirmed sales return (C1 / W5).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getLinkedDamageInvoices(int $returnId): array
+    {
+        if ($returnId <= 0) {
+            return [];
+        }
+
+        $this->db->query("
+            SELECT di.id, di.damage_code, di.damage_date, di.total_value,
+                   COALESCE(di.is_reversed, 0) AS is_reversed,
+                   w.warehouse_name
+            FROM damage_invoices di
+            LEFT JOIN warehouses w ON w.id = di.warehouse_id
+            WHERE di.sales_return_id = :rid
+            ORDER BY di.id ASC
+        ");
+        $this->db->bind(':rid', $returnId);
+
+        return $this->db->resultSet() ?: [];
     }
 
 // Helper Method
@@ -429,6 +455,7 @@ public function confirmReturn($return_id, $items) {
         $this->assertInvoiceAccessible($branchId);
 
         $cogsTotal = 0.0;
+        $damageByWarehouse = [];
 
         foreach ($items as $item) {
             $return_item_id = (int)$item['return_item_id'];
@@ -525,17 +552,63 @@ public function confirmReturn($return_id, $items) {
                     'remarks'        => "Sales Return - Good Condition"
                 ]);
                 $cogsTotal += $return_qty * $avgCost;
-            } else {
+            } elseif ($condition === 'Damage' && $return_qty > 0) {
+                $avgCost = $this->stock->getWarehouseAvgCost($warehouse_id, $product_id);
+                if ($avgCost <= 0) {
+                    $avgCost = $rate;
+                }
+
+                $this->stock->updateWarehouseStock(
+                    $warehouse_id,
+                    $product_id,
+                    $return_qty,
+                    $avgCost
+                );
+
                 $this->stock->logMovement([
                     'product_id'     => $product_id,
                     'warehouse_id'   => $warehouse_id,
-                    'qty'            => 0,
-                    'rate'           => $rate,
+                    'qty'            => $return_qty,
+                    'rate'           => $avgCost,
                     'reference_type' => 'sales_return',
                     'reference_id'   => $return_id,
-                    'remarks'        => "Sales Return - Damaged Item"
+                    'remarks'        => 'Damaged return received for write-off',
                 ]);
+
+                if (!isset($damageByWarehouse[$warehouse_id])) {
+                    $damageByWarehouse[$warehouse_id] = [];
+                }
+                $damageByWarehouse[$warehouse_id][] = [
+                    'return_item_id' => $return_item_id,
+                    'product_id'     => $product_id,
+                    'qty'            => $return_qty,
+                    'rate'           => round($avgCost, 2),
+                ];
             }
+        }
+
+        $damageWriteOffTotal = 0.0;
+        $linkedDamageIds = [];
+        $linkedDamages = [];
+        $returnCodeForDamage = (string)($returnHeader['return_code'] ?? ('SR-' . $return_id));
+        $damageDate = (string)($returnHeader['return_date'] ?? date('Y-m-d'));
+
+        foreach ($damageByWarehouse as $warehouseId => $damageLines) {
+            $damageResult = $this->createLinkedDamageWriteOff(
+                $return_id,
+                $returnCodeForDamage,
+                (int)$warehouseId,
+                $branchId,
+                $damageDate,
+                $damageLines
+            );
+            $linkedDamageIds[] = (int)$damageResult['damage_id'];
+            $linkedDamages[] = [
+                'id'          => (int)$damageResult['damage_id'],
+                'damage_code' => (string)$damageResult['damage_code'],
+                'total_value' => (float)$damageResult['total_value'],
+            ];
+            $damageWriteOffTotal += (float)$damageResult['total_value'];
         }
 
         $this->db->query("
@@ -603,6 +676,9 @@ public function confirmReturn($return_id, $items) {
             'success' => true,
             'journal_entry_id' => $journalResult['journal_entry_id'] ?? null,
             'cogs_amount' => round($cogsTotal, 2),
+            'damage_writeoff_total' => round($damageWriteOffTotal, 2),
+            'linked_damage_ids' => $linkedDamageIds,
+            'linked_damages' => $linkedDamages,
         ];
 
     } catch (Exception $e) {
@@ -844,6 +920,10 @@ public function confirmReturn($return_id, $items) {
             if ($qty <= 0.0001) {
                 continue;
             }
+            $remarks = (string)($movement['remarks'] ?? '');
+            if (stripos($remarks, 'Damaged return received') !== false) {
+                continue;
+            }
             $warehouseId = (int)($movement['warehouse_id'] ?? 0);
             $productId = (int)($movement['product_id'] ?? 0);
             if ($warehouseId <= 0 || $productId <= 0) {
@@ -964,6 +1044,7 @@ public function reverseReturn($return_id, $reason = '') {
                 throw new Exception($stockBlock);
             }
 
+            $this->reverseLinkedDamageForReturn($return_id, $return_code, $reason);
             $this->reverseConfirmedReturnStock($return_id, $return_code, $reason);
             $stockLinesReversed = count($this->stock->getByReference('sales_return_reversal', $return_id));
 
@@ -1288,7 +1369,17 @@ public function getFilteredReturns($filters = []) {
             c.customer_name,
             c.mobile,
             b.branch_name,
-            u.username AS created_by_name
+            u.username AS created_by_name,
+            (SELECT COUNT(*)
+             FROM damage_invoices di
+             WHERE di.sales_return_id = sr.id
+               AND COALESCE(di.is_reversed, 0) = 0) AS linked_damage_count,
+            (SELECT di.id
+             FROM damage_invoices di
+             WHERE di.sales_return_id = sr.id
+               AND COALESCE(di.is_reversed, 0) = 0
+             ORDER BY di.id ASC
+             LIMIT 1) AS linked_damage_id
     ";
 
     private function applyReturnStatusFilter(string $status, array &$where, array &$bindings): void
@@ -1497,6 +1588,226 @@ public function getFilteredReturns($filters = []) {
         $this->db->bind(':jid', $journalEntryId);
         $this->db->bind(':id', $returnId);
         return $this->db->execute();
+    }
+
+    /**
+     * Auto damage write-off for confirmed damaged return lines (same DB transaction).
+     *
+     * @param list<array{return_item_id:int,product_id:int,qty:float,rate:float}> $lines
+     * @return array{damage_id:int,damage_code:string,total_value:float,journal_entry_id:?int}
+     */
+    private function createLinkedDamageWriteOff(
+        int $returnId,
+        string $returnCode,
+        int $warehouseId,
+        int $branchId,
+        string $damageDate,
+        array $lines
+    ): array {
+        if ($warehouseId <= 0 || $lines === []) {
+            throw new Exception('Invalid damage write-off request.');
+        }
+
+        if (!$this->warehouseBelongsToBranch($warehouseId, $branchId)) {
+            throw new Exception('Damage warehouse does not belong to this branch.');
+        }
+
+        $lineItems = [];
+        $totalValue = 0.0;
+        foreach ($lines as $line) {
+            $productId = (int)($line['product_id'] ?? 0);
+            $qty = (float)($line['qty'] ?? 0);
+            $rate = round((float)($line['rate'] ?? 0), 2);
+            if ($productId <= 0 || $qty <= 0) {
+                continue;
+            }
+            if ($rate <= 0) {
+                $rate = round($this->stock->getWarehouseAvgCost($warehouseId, $productId), 2);
+            }
+            $lineItems[] = [
+                'return_item_id' => (int)($line['return_item_id'] ?? 0),
+                'product_id'     => $productId,
+                'qty'            => $qty,
+                'rate'           => $rate,
+            ];
+            $totalValue += $qty * $rate;
+        }
+
+        if ($lineItems === []) {
+            throw new Exception('No valid lines for damage write-off.');
+        }
+
+        $totalValue = round($totalValue, 2);
+        $damageCode = 'DMG-SR-' . $returnId . '-W' . $warehouseId . '-' . date('His');
+        $remarks = 'Auto write-off for damaged sales return #' . $returnCode;
+        $userId = (int)($_SESSION['user_id'] ?? 1);
+
+        $this->db->query('
+            INSERT INTO damage_invoices
+            (damage_code, warehouse_id, damage_date, total_value, remarks, sales_return_id, created_by)
+            VALUES (:code, :wid, :date, :total, :remarks, :srid, :uid)
+        ');
+        $this->db->bind(':code', $damageCode);
+        $this->db->bind(':wid', $warehouseId);
+        $this->db->bind(':date', $damageDate);
+        $this->db->bind(':total', $totalValue);
+        $this->db->bind(':remarks', $remarks);
+        $this->db->bind(':srid', $returnId);
+        $this->db->bind(':uid', $userId);
+        $this->db->execute();
+
+        $damageId = (int)$this->db->lastInsertId();
+
+        foreach ($lineItems as $line) {
+            $this->db->query('
+                INSERT INTO damage_invoice_items
+                (damage_invoice_id, product_id, qty, rate)
+                VALUES (:did, :pid, :qty, :rate)
+            ');
+            $this->db->bind(':did', $damageId);
+            $this->db->bind(':pid', $line['product_id']);
+            $this->db->bind(':qty', $line['qty']);
+            $this->db->bind(':rate', $line['rate']);
+            $this->db->execute();
+
+            $this->stock->updateWarehouseStock(
+                $warehouseId,
+                $line['product_id'],
+                -$line['qty'],
+                0
+            );
+
+            $this->stock->logMovement([
+                'product_id'     => $line['product_id'],
+                'warehouse_id'   => $warehouseId,
+                'qty'            => -$line['qty'],
+                'rate'           => $line['rate'],
+                'reference_type' => 'damage',
+                'reference_id'   => $damageId,
+                'remarks'        => 'Damaged return write-off #' . $returnCode,
+            ]);
+
+            if ($line['return_item_id'] > 0) {
+                $this->db->query('
+                    UPDATE sales_return_items
+                    SET damage_invoice_id = :did
+                    WHERE id = :id AND sales_return_id = :rid
+                ');
+                $this->db->bind(':did', $damageId);
+                $this->db->bind(':id', $line['return_item_id']);
+                $this->db->bind(':rid', $returnId);
+                $this->db->execute();
+            }
+        }
+
+        $journalEntryId = null;
+        if ($totalValue >= 0.01) {
+            require_once __DIR__ . '/../services/Accounting/JournalPostingService.php';
+            $journalService = new JournalPostingService();
+            $glResult = $journalService->postDamage($damageId, [
+                'damage_code'  => $damageCode,
+                'damage_date'  => $damageDate,
+                'branch_id'    => $branchId,
+            ], $totalValue);
+
+            if (($glResult['status'] ?? '') === 'error') {
+                throw new Exception('Damage GL posting failed: ' . ($glResult['message'] ?? 'unknown'));
+            }
+
+            $journalEntryId = !empty($glResult['journal_entry_id']) ? (int)$glResult['journal_entry_id'] : null;
+            if ($journalEntryId) {
+                $this->db->query('UPDATE damage_invoices SET journal_entry_id = :jeid WHERE id = :id');
+                $this->db->bind(':jeid', $journalEntryId);
+                $this->db->bind(':id', $damageId);
+                $this->db->execute();
+            }
+        }
+
+        return [
+            'damage_id'         => $damageId,
+            'damage_code'       => $damageCode,
+            'total_value'       => $totalValue,
+            'journal_entry_id'  => $journalEntryId,
+        ];
+    }
+
+    /**
+     * Undo linked auto damage write-offs before reversing return stock receive legs.
+     */
+    private function reverseLinkedDamageForReturn(int $returnId, string $returnCode, string $reason): void
+    {
+        $this->db->query('
+            SELECT id, damage_code, journal_entry_id
+            FROM damage_invoices
+            WHERE sales_return_id = :rid
+              AND COALESCE(is_reversed, 0) = 0
+            FOR UPDATE
+        ');
+        $this->db->bind(':rid', $returnId);
+        $damageRows = $this->db->resultSet() ?: [];
+
+        if ($damageRows === []) {
+            return;
+        }
+
+        require_once __DIR__ . '/../services/Accounting/JournalPostingService.php';
+        $journalService = new JournalPostingService();
+        $movementReason = 'Reversal of return #' . $returnCode . ' linked damage: ' . $reason;
+
+        foreach ($damageRows as $damage) {
+            $damageId = (int)($damage['id'] ?? 0);
+            if ($damageId <= 0) {
+                continue;
+            }
+
+            $movements = $this->stock->getByReference('damage', $damageId);
+            $reversed = 0;
+            foreach ($movements as $movement) {
+                if (!empty($movement['is_reversed'])) {
+                    continue;
+                }
+                $qty = (float)($movement['qty'] ?? 0);
+                if (abs($qty) < 0.0001) {
+                    continue;
+                }
+                try {
+                    $ok = $this->stock->transactions()->reverseTransaction(
+                        (int)$movement['id'],
+                        $movementReason
+                    );
+                } catch (RuntimeException $e) {
+                    throw new Exception($e->getMessage());
+                }
+                if ($ok) {
+                    $reversed++;
+                }
+            }
+
+            if ($reversed === 0 && $movements !== []) {
+                throw new Exception('Could not reverse linked damage stock for #' . ($damage['damage_code'] ?? $damageId));
+            }
+
+            $journalId = (int)($damage['journal_entry_id'] ?? 0);
+            if ($journalId > 0) {
+                $rev = $journalService->reverseLinkedJournal($journalId, $movementReason);
+                if (($rev['status'] ?? '') === 'error') {
+                    throw new Exception('Failed to reverse linked damage GL: ' . ($rev['message'] ?? ''));
+                }
+            }
+
+            $this->db->query('
+                UPDATE damage_invoices
+                SET is_reversed = 1,
+                    reversed_at = NOW(),
+                    reversed_by = :uid,
+                    reverse_reason = :reason
+                WHERE id = :id
+            ');
+            $this->db->bind(':uid', (int)($_SESSION['user_id'] ?? 1));
+            $this->db->bind(':reason', $reason);
+            $this->db->bind(':id', $damageId);
+            $this->db->execute();
+        }
     }
 
 }

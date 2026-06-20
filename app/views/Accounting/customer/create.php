@@ -1,7 +1,7 @@
 <?php
 ob_start();
 $title = $title ?? 'New customer payment';
-$customers = $customers ?? [];
+$preselectCustomer = $preselectCustomer ?? null;
 $banks = $banks ?? [];
 $employees = $employees ?? [];
 $today = $today ?? date('Y-m-d');
@@ -17,7 +17,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         <div>
             <h1><i class="fas fa-plus me-2"></i>New customer payment</h1>
             <p>Record receive, refund, discount, or write-off against customer AR.</p>
-            <span class="hero-badge"><i class="fas fa-book"></i> customer_ledger</span>
+            <span class="hero-badge"><i class="fas fa-building"></i> <?= htmlspecialchars($branch_name ?? 'Branch', ENT_QUOTES) ?></span>
         </div>
         <div class="branch-hub-actions">
             <a href="<?= BASE_URL ?>CustomerTransaction" class="btn btn-outline-light btn-sm">
@@ -28,7 +28,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
 
     <div class="branch-form-layout has-aside">
         <div class="branch-form-panel">
-            <form id="customerTransactionForm" class="needs-validation" novalidate>
+            <form id="customerTransactionForm" class="needs-validation" novalidate aria-label="New customer payment">
                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
 
                 <div class="branch-form-section">
@@ -38,18 +38,27 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                     </div>
                     <div class="row g-3">
                         <div class="col-12 col-md-6">
-                            <label class="form-label" for="customer_id">Customer <span class="text-danger">*</span></label>
-                            <select name="customer_id" id="customer_id" class="form-select" required>
-                                <option value="">— Select customer —</option>
-                                <?php
-                                $preselectCustomer = (int)($_GET['customer_id'] ?? 0);
-                                foreach ($customers as $c): ?>
-                                <option value="<?= (int)$c['id'] ?>"<?= $preselectCustomer === (int)$c['id'] ? ' selected' : '' ?>>
-                                    <?= htmlspecialchars($c['shop_name'] ?? '', ENT_QUOTES) ?>
-                                    <?php if (!empty($c['mobile'])): ?> (<?= htmlspecialchars($c['mobile'], ENT_QUOTES) ?>)<?php endif; ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="hidden" name="customer_id" id="customer_id" value="<?= (int)($preselectCustomer['id'] ?? 0) ?>">
+                            <label class="form-label" for="custTxnCustomerSearch" id="custTxnCustomerSearchLabel">
+                                Customer <span class="text-danger">*</span>
+                            </label>
+                            <div class="cust-txn-customer-picker">
+                                <div class="position-relative flex-grow-1">
+                                    <input type="text" id="custTxnCustomerSearch" class="form-control cust-txn-search-input"
+                                           placeholder="Search shop, name, mobile, or code…" autocomplete="off"
+                                           value="<?= htmlspecialchars($preselectCustomer['shop_name'] ?? '', ENT_QUOTES) ?>">
+                                    <div id="custTxnCustomerSuggestions" class="cust-txn-suggest-list"></div>
+                                </div>
+                                <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="custTxnChangeCustomer" title="Change customer">
+                                    Change
+                                </button>
+                            </div>
+                            <div id="custTxnCustomerRecents" class="cust-txn-recents mt-2"></div>
+                            <div id="custTxnCustomerHubLink" class="small mt-1<?= empty($preselectCustomer) ? ' d-none' : '' ?>">
+                                <a href="<?= BASE_URL ?>customer/show/<?= (int)($preselectCustomer['id'] ?? 0) ?>" id="custTxnCustomerHubAnchor">
+                                    <i class="fas fa-circle-info me-1"></i> Customer hub
+                                </a>
+                            </div>
                         </div>
                         <div class="col-12 col-md-6">
                             <label class="form-label" for="collected_by">Collected by <span class="text-danger">*</span></label>
@@ -60,7 +69,7 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                             </select>
                         </div>
                     </div>
-                    <div id="dueSummary" class="cust-txn-due-banner d-none mt-3"></div>
+                    <div id="dueSummary" class="cust-txn-due-banner d-none mt-3" role="status" aria-live="polite"></div>
                 </div>
 
                 <div class="branch-form-section">
@@ -71,18 +80,18 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                     <div class="row g-3">
                         <div class="col-12 col-md-4">
                             <label class="form-label" for="transaction_type">Type <span class="text-danger">*</span></label>
-                            <select name="transaction_type" id="transaction_type" class="form-select" required>
+                            <select name="transaction_type" id="transaction_type" class="form-select" required aria-required="true" aria-describedby="typeHint">
                                 <option value="">— Select —</option>
                                 <option value="receive">Receive (customer payment)</option>
                                 <option value="payment">Payment (refund / advance)</option>
                                 <option value="discount">Discount given</option>
                                 <option value="write_off">Write-off (bad debt)</option>
                             </select>
-                            <div id="typeHint" class="cust-txn-type-hint mt-1"></div>
+                            <div id="typeHint" class="cust-txn-type-hint mt-1" role="note"></div>
                         </div>
                         <div class="col-12 col-md-4">
                             <label class="form-label" for="amount">Amount (Tk) <span class="text-danger">*</span></label>
-                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required>
+                            <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control" required aria-required="true" inputmode="decimal" autocomplete="off">
                         </div>
                         <div class="col-12 col-md-4">
                             <label class="form-label" for="transaction_date">Date</label>
@@ -120,7 +129,8 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
                         <span class="icon-wrap teal"><i class="fas fa-comment"></i></span>
                         Remarks
                     </div>
-                    <textarea name="narration" class="form-control" rows="3" placeholder="Optional narration…"></textarea>
+                    <label class="form-label" for="narration">Remarks</label>
+                    <textarea name="narration" id="narration" class="form-control" rows="3" placeholder="Optional narration…"></textarea>
                 </div>
 
                 <div class="branch-form-footer">
@@ -133,27 +143,28 @@ $csrfToken = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES);
         </div>
 
         <aside class="branch-form-aside">
-            <div class="aside-title">Tips</div>
-            <div class="branch-aside-tip">
+            <div class="aside-title">GL preview</div>
+            <div id="accounting_preview" class="branch-preview-card" role="region" aria-label="GL posting preview" aria-live="polite">
+                <p class="text-muted small mb-0">Select customer, type, and amount to preview double-entry.</p>
+            </div>
+            <div class="branch-aside-tip mt-3">
                 <i class="fas fa-hand-holding-dollar me-1"></i>
-                <strong>Receive</strong> — Dr cash/bank, Cr AR. <strong>Refund</strong> — Dr AR, Cr cash/bank. <strong>Discount / write-off</strong> — Dr expense, Cr AR (no cash movement).
+                <strong>Receive</strong> — Dr cash/bank, Cr AR. <strong>Refund</strong> — Dr AR, Cr cash/bank.
             </div>
             <div class="branch-aside-tip mt-2">
-                <i class="fas fa-building-columns me-1"></i>
-                Bank mode updates <code>banks.balance</code> on receive (in) and refund (out). All types post GL when ledgers are configured.
-            </div>
-            <div class="branch-preview-card mt-3">
-                <div class="aside-title mb-2">Preview</div>
-                <div class="branch-avatar" id="previewAvatar">?</div>
-                <div class="preview-name" id="previewCustomer">Customer</div>
-                <div class="preview-code" id="previewType">Type</div>
-                <div class="mt-2 cust-txn-amount receive" id="previewAmount">Tk 0</div>
+                <i class="fas fa-percent me-1"></i>
+                <strong>Discount</strong> — Dr sales discount, Cr AR. <strong>Write-off</strong> — Dr bad debt expense, Cr AR.
             </div>
         </aside>
     </div>
 </div>
 
-<script>window.CT_BOOT = { baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?> };</script>
+<script>window.CT_BOOT = {
+    baseUrl: <?= json_encode(BASE_URL, JSON_THROW_ON_ERROR) ?>,
+    preselectCustomer: <?= json_encode($preselectCustomer ?: null, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) ?>,
+    glLabels: <?= json_encode($gl_preview_labels ?? [], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) ?>
+};</script>
+<script src="<?= BASE_URL ?>assets/js/accounting-journal-preview.js"></script>
 <script src="<?= BASE_URL ?>assets/js/CustomerTransaction.js"></script>
 
 <?php

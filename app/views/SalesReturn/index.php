@@ -13,18 +13,34 @@ ob_start();
     <header class="sales-return-hero">
         <div>
             <h1><i class="fas fa-undo-alt me-2"></i>Sales Returns</h1>
-            <p>Create, confirm, and reverse customer returns</p>
+            <p>Two-step flow — receive from customer, then warehouse confirms stock</p>
+            <div class="sr-journey-steps sr-journey-steps--hero" aria-label="Return process">
+                <div class="sr-journey-step">
+                    <span class="sr-journey-num">1</span>
+                    <span class="sr-journey-label">Receive from customer</span>
+                </div>
+                <span class="sr-journey-arrow" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
+                <div class="sr-journey-step">
+                    <span class="sr-journey-num">2</span>
+                    <span class="sr-journey-label">Warehouse confirm</span>
+                </div>
+                <span class="sr-journey-arrow" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
+                <div class="sr-journey-step is-muted">
+                    <span class="sr-journey-num">3</span>
+                    <span class="sr-journey-label">Damage write-off (if damaged)</span>
+                </div>
+            </div>
             <span class="sales-return-branch-tag"><i class="fas fa-map-marker-alt me-1"></i><?= htmlspecialchars($branchName, ENT_QUOTES) ?></span>
             <?php if ($pendingCount > 0): ?>
             <button type="button" class="sales-return-pending-badge border-0" id="filterPendingOnly">
-                <i class="fas fa-clock me-1"></i><span id="heroPendingCount"><?= $pendingCount ?></span> awaiting confirm
+                <i class="fas fa-clock me-1"></i><span id="heroPendingCount"><?= $pendingCount ?></span> awaiting warehouse confirm
             </button>
             <?php endif; ?>
         </div>
         <div class="sales-return-hero-actions d-flex gap-2 flex-shrink-0">
        
             <button type="button" class="btn btn-light btn-sm" id="openSalesReturnCreate" data-bs-toggle="offcanvas" data-bs-target="#salesReturnCreateOffcanvas" aria-controls="salesReturnCreateOffcanvas">
-                <i class="fas fa-plus"></i> Receive
+                <i class="fas fa-box-open"></i> Step 1 — Receive
             </button>
             <a href="<?= BASE_URL ?>SalesReturn/create" class="btn btn-light btn-sm d-none d-md-inline-flex" title="Full page receive">
                 <i class="fas fa-external-link-alt"></i>
@@ -35,11 +51,29 @@ ob_start();
             <a href="<?= BASE_URL ?>SalesReturn/audit" class="btn btn-light btn-sm">
                 <i class="fas fa-clipboard-list"></i> Audit
             </a>
+            <a href="<?= BASE_URL ?>Damage" class="btn btn-outline-light btn-sm" title="Damage write-offs (linked from returns or manual)">
+                <i class="fas fa-heart-crack"></i> Damage
+            </a>
             <button type="button" class="btn btn-light btn-sm collapsed" id="toggleSalesReturnFilters" data-bs-toggle="collapse" data-bs-target="#salesReturnFiltersCollapse" aria-expanded="false" aria-controls="salesReturnFiltersCollapse" title="Filters">
                 <i class="fas fa-filter me-1"></i>Filters
             </button>
         </div>
     </header>
+
+    <?php
+    $returnDamageLinks = $_SESSION['return_damage_links'] ?? null;
+    unset($_SESSION['return_damage_links']);
+    if (!empty($returnDamageLinks) && is_array($returnDamageLinks)):
+    ?>
+    <div class="alert alert-info border-0 shadow-sm mb-2 py-2 px-3 d-flex flex-wrap align-items-center gap-2">
+        <span><i class="fas fa-heart-crack me-1"></i><strong>Linked damage write-off</strong> created from this return:</span>
+        <?php foreach ($returnDamageLinks as $dmg): ?>
+        <a href="<?= BASE_URL ?>Damage/details/<?= (int)($dmg['id'] ?? 0) ?>" class="btn btn-sm btn-outline-primary">
+            <?= htmlspecialchars($dmg['damage_code'] ?? 'Damage', ENT_QUOTES) ?>
+        </a>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
 
     <section class="sales-return-filters-shell">
        
@@ -69,7 +103,7 @@ ob_start();
                         <span>All</span><span class="chip-count">0</span>
                     </button>
                     <button type="button" class="sales-return-status-chip chip-urgent" data-status="pending">
-                        <span>Awaiting confirm</span><span class="chip-count">0</span>
+                        <span>Awaiting warehouse</span><span class="chip-count">0</span>
                     </button>
                     <button type="button" class="sales-return-status-chip" data-status="active">
                         <span>Active</span><span class="chip-count">0</span>
@@ -144,8 +178,8 @@ ob_start();
 <div class="offcanvas offcanvas-end sales-return-create-offcanvas" tabindex="-1" id="salesReturnCreateOffcanvas" aria-labelledby="salesReturnCreateOffcanvasLabel">
     <div class="offcanvas-header">
         <div>
-            <h5 class="offcanvas-title mb-0" id="salesReturnCreateOffcanvasLabel"><i class="fas fa-box-open me-2"></i>Quick receive</h5>
-            <p class="mb-0 small opacity-90">Search invoice → enter return qty → save</p>
+            <h5 class="offcanvas-title mb-0" id="salesReturnCreateOffcanvasLabel"><i class="fas fa-box-open me-2"></i>Step 1 — Receive from customer</h5>
+            <p class="mb-0 small opacity-90">Search invoice → enter qty → save (warehouse confirms later)</p>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
     </div>

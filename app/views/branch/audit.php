@@ -1,7 +1,10 @@
 <?php
 ob_start();
+require_once __DIR__ . '/../../helpers/MasterDataAuditHelper.php';
+
 $title = $title ?? 'Branch Audit Logs';
 $logs = $logs ?? [];
+$canManage = Auth::isAdmin();
 
 $countCreated = 0;
 $countUpdated = 0;
@@ -34,32 +37,11 @@ function branchAuditActionClass(string $action): string
 function branchAuditActionLabel(string $action): string
 {
     return match (true) {
-        str_contains($action, 'created') => 'Created',
-        str_contains($action, 'updated') => 'Updated',
-        str_contains($action, 'status_changed') => 'Status changed',
+        str_contains($action, 'branch_created') => 'Created',
+        str_contains($action, 'branch_updated') => 'Updated',
+        str_contains($action, 'branch_status_changed') => 'Status changed',
         default => $action,
     };
-}
-
-function branchAuditFormatDetails($details): string
-{
-    if (empty($details) || !is_array($details)) {
-        return '<span class="text-muted">—</span>';
-    }
-
-    $parts = [];
-    if (!empty($details['branch_name'])) {
-        $parts[] = '<strong>Name:</strong> ' . htmlspecialchars((string)$details['branch_name'], ENT_QUOTES);
-    }
-    if (!empty($details['new_status'])) {
-        $parts[] = '<strong>Status:</strong> ' . htmlspecialchars((string)$details['new_status'], ENT_QUOTES);
-    }
-    if (empty($parts)) {
-        $json = json_encode($details, JSON_UNESCAPED_UNICODE);
-        return '<span class="branch-audit-details">' . htmlspecialchars($json ?: '', ENT_QUOTES) . '</span>';
-    }
-
-    return '<div class="branch-audit-details">' . implode(' · ', $parts) . '</div>';
 }
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/branch-index.css">
@@ -68,12 +50,14 @@ function branchAuditFormatDetails($details): string
     <header class="branch-hub-hero">
         <div>
             <h1><i class="fas fa-clock-rotate-left me-2"></i>Branch audit trail</h1>
-            <p>Who created, updated, or changed status on branches — last 300 branch-related events.</p>
+            <p>Who created, updated, or changed status on branches — last 300 branch-related events with field-level diffs.</p>
         </div>
         <div class="branch-hub-actions">
+            <?php if ($canManage): ?>
             <a href="<?= BASE_URL ?>branch/create" class="btn btn-outline-light btn-sm">
                 <i class="fas fa-plus me-1"></i> New branch
             </a>
+            <?php endif; ?>
             <a href="<?= BASE_URL ?>branch" class="btn btn-light btn-sm">
                 <i class="fas fa-arrow-left me-1"></i> Branches
             </a>
@@ -95,7 +79,7 @@ function branchAuditFormatDetails($details): string
                         <th>When</th>
                         <th>User</th>
                         <th>Action</th>
-                        <th>Branch ID</th>
+                        <th>Branch</th>
                         <th>Details</th>
                         <th>IP</th>
                     </tr>
@@ -113,22 +97,32 @@ function branchAuditFormatDetails($details): string
                         <?php
                         $action = (string)($log['action'] ?? '');
                         $actionClass = branchAuditActionClass($action);
-                        $targetId = $log['target_user_id'] ?? '—';
+                        $targetId = (int)($log['target_user_id'] ?? 0);
+                        $userLabel = htmlspecialchars(
+                            $log['performed_by_name'] ?? ('#' . (int)($log['performed_by'] ?? 0)),
+                            ENT_QUOTES
+                        );
                         ?>
                         <tr>
                             <td><small class="text-nowrap"><?= htmlspecialchars($log['timestamp'] ?? '', ENT_QUOTES) ?></small></td>
                             <td>
-                                <span class="badge rounded-pill bg-light text-dark border">
-                                    #<?= (int)($log['performed_by'] ?? 0) ?>
-                                </span>
+                                <span class="badge rounded-pill bg-light text-dark border"><?= $userLabel ?></span>
                             </td>
                             <td>
                                 <span class="branch-audit-action <?= $actionClass ?>">
                                     <?= htmlspecialchars(branchAuditActionLabel($action), ENT_QUOTES) ?>
                                 </span>
                             </td>
-                            <td><strong><?= htmlspecialchars((string)$targetId, ENT_QUOTES) ?></strong></td>
-                            <td><?= branchAuditFormatDetails($log['details'] ?? []) ?></td>
+                            <td>
+                                <?php if ($targetId > 0): ?>
+                                    <a href="<?= BASE_URL ?>branch/edit/<?= $targetId ?>" class="text-decoration-none fw-semibold">
+                                        #<?= $targetId ?>
+                                    </a>
+                                <?php else: ?>
+                                    <span class="text-muted">—</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= MasterDataAuditHelper::renderDetailsHtml($log['details'] ?? []) ?></td>
                             <td><small class="text-muted"><?= htmlspecialchars($log['ip'] ?? 'unknown', ENT_QUOTES) ?></small></td>
                         </tr>
                     <?php endforeach; ?>
@@ -138,7 +132,7 @@ function branchAuditFormatDetails($details): string
         </div>
         <div class="branch-audit-meta-foot">
             <i class="fas fa-file-lines me-1"></i>
-            Stored in <code>logs/user_audit.log</code> · Filter prefix <code>branch_</code> · Newest events sort first in the table.
+            Stored in <code>logs/user_audit.log</code> · Filter prefix <code>branch_</code> · Click branch ID to open edit.
         </div>
     </div>
 </div>

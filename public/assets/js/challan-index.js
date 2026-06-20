@@ -60,6 +60,9 @@
             const status = $(this).data('status');
             $('#filterStatus').val(status);
             syncStatusChips();
+            if (isWorkflowStatus(status)) {
+                applyWorkflowFilterView(status, false);
+            }
             persistAndReload();
         });
 
@@ -81,6 +84,32 @@
 
         $('#clearFilters').on('click', resetFilters);
         $('#filterSmartSort').on('change', persistAndReload);
+
+        $('#filterOpenQueue').on('click', () => applyWorkflowFilterView('open'));
+        $('#filterReadyChallan').on('click', () => applyWorkflowFilterView('needs_challan'));
+    }
+
+    /** Open workflow items may be older than today — widen date when filtering queue. */
+    function applyWorkflowFilterView(status, reload = true) {
+        const today = new Date();
+        const fmt = d => d.toISOString().slice(0, 10);
+        const from = new Date(today);
+        from.setDate(from.getDate() - 30);
+        $('#filterStatus').val(status);
+        $('#filterDateFrom').val(fmt(from));
+        $('#filterDateTo').val(fmt(today));
+        $('.challan-preset-btn').removeClass('active');
+        $('.challan-preset-btn[data-preset="custom"]').addClass('active');
+        syncStatusChips();
+        if (reload) persistAndReload(true);
+        const collapse = document.getElementById('challanFiltersCollapse');
+        if (collapse && typeof bootstrap !== 'undefined' && !collapse.classList.contains('show')) {
+            bootstrap.Collapse.getOrCreateInstance(collapse).show();
+        }
+    }
+
+    function isWorkflowStatus(status) {
+        return status === 'open' || status === 'needs_godown' || status === 'needs_challan';
     }
 
     function applyDatePreset(preset, reload = true) {
@@ -276,7 +305,7 @@
                 {
                     data: 'invoice_code',
                     render: (d, t, row) => `<strong class="text-primary">${escapeHtml(d)}</strong>` +
-                        (row.total_amount ? `<br><small class="text-muted">৳${parseFloat(row.total_amount).toFixed(2)}</small>` : ''),
+                        (row.total_amount ? `<br><small class="text-muted">Tk ${parseFloat(row.total_amount).toFixed(2)}</small>` : ''),
                 },
                 { data: 'invoice_date' },
                 {
@@ -325,12 +354,12 @@
     function actionButton(row) {
         const base = window.CHALLAN_BASE + 'create/' + row.id;
         if (row.status === 'draft') {
-            return `<a href="${base}" class="btn btn-sm btn-primary"><i class="fas fa-warehouse"></i> Prepare godown</a>`;
+            return `<a href="${base}" class="btn btn-sm btn-primary" title="Step 2 — Assign warehouses & save godown"><i class="fas fa-warehouse me-1"></i><span class="d-none d-xl-inline">Prepare godown</span></a>`;
         }
         if (row.status === 'godown_issued') {
-            return `<a href="${base}" class="btn btn-sm btn-warning text-dark"><i class="fas fa-truck"></i> Finalize challan</a>`;
+            return `<a href="${base}" class="btn btn-sm btn-warning text-dark" title="Step 3 — Deduct stock & complete"><i class="fas fa-truck me-1"></i><span class="d-none d-xl-inline">Finalize</span></a>`;
         }
-        return `<a href="${base}" class="btn btn-sm btn-outline-success"><i class="fas fa-eye"></i> View</a>`;
+        return `<a href="${base}" class="btn btn-sm btn-outline-success" title="View documents"><i class="fas fa-eye me-1"></i><span class="d-none d-xl-inline">View</span></a>`;
     }
 
     function renderMobileCards(table) {
@@ -360,7 +389,7 @@
                 <div class="card-meta">
                     <span><i class="fas fa-calendar-day"></i> ${escapeHtml(row.invoice_date || '')}</span>
                     <span><i class="fas fa-user"></i> ${escapeHtml(row.salesman_name || '—')}</span>
-                    ${row.total_amount ? `<span><i class="fas fa-coins"></i> ৳${parseFloat(row.total_amount).toFixed(2)}</span>` : ''}
+                    ${row.total_amount ? `<span><i class="fas fa-coins"></i> Tk ${parseFloat(row.total_amount).toFixed(2)}</span>` : ''}
                 </div>
                 <div class="card-actions">${action}</div>
             </div>`;

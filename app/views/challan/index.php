@@ -2,6 +2,8 @@
 $title = 'Warehouse — Godown & Challan';
 $filters = $filters ?? [];
 $branchName = $session_branch_name ?? 'Branch';
+$openQueueCount = (int)($open_queue_count ?? 0);
+$needsChallanCount = (int)($needs_challan_count ?? 0);
 ob_start();
 ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>assets/css/sales-pos.css">
@@ -12,8 +14,25 @@ ob_start();
     <header class="challan-index-hero">
         <div>
             <h1><i class="fas fa-warehouse me-2"></i>Godown & Challan</h1>
-            <p>Prepare godown copies and finalize delivery challans</p>
+            <p>Invoice → godown setup → finalize challan &amp; deduct stock</p>
+            <div class="challan-journey-steps" aria-label="Workflow">
+                <div class="challan-journey-step"><span class="num">1</span> Invoice</div>
+                <i class="fas fa-chevron-right challan-journey-arrow" aria-hidden="true"></i>
+                <div class="challan-journey-step"><span class="num">2</span> Godown</div>
+                <i class="fas fa-chevron-right challan-journey-arrow" aria-hidden="true"></i>
+                <div class="challan-journey-step"><span class="num">3</span> Challan</div>
+            </div>
             <span class="challan-branch-tag"><i class="fas fa-map-marker-alt me-1"></i><?= htmlspecialchars($branchName, ENT_QUOTES) ?></span>
+            <?php if ($openQueueCount > 0): ?>
+            <button type="button" class="challan-queue-badge border-0" id="filterOpenQueue" title="Show all invoices needing warehouse action">
+                <i class="fas fa-bolt me-1"></i><span id="heroOpenCount"><?= $openQueueCount ?></span> need warehouse action
+            </button>
+            <?php endif; ?>
+            <?php if ($needsChallanCount > 0): ?>
+            <button type="button" class="challan-queue-badge challan-queue-badge--ready border-0" id="filterReadyChallan" title="Godown saved — ready to finalize">
+                <i class="fas fa-truck me-1"></i><span id="heroReadyCount"><?= $needsChallanCount ?></span> ready for challan
+            </button>
+            <?php endif; ?>
         </div>
         <div class="challan-hero-actions d-flex gap-2 flex-shrink-0">
            

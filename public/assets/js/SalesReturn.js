@@ -298,15 +298,19 @@
                         <td class="text-center">${formatQty(item.qty)}</td>
                         <td class="text-center text-success fw-bold">${formatQty(returnable)}</td>
                         <td>
-                            <input type="number" class="form-control form-control-sm return-qty text-center"
-                                   name="items[${item.id}][return_qty]"
-                                   max="${returnable}" step="0.01" min="0" value="0"
-                                   data-rate="${parseFloat(item.rate || 0)}">
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control return-qty text-center"
+                                       name="items[${item.id}][return_qty]"
+                                       max="${returnable}" step="0.01" min="0" value="0"
+                                       data-rate="${parseFloat(item.rate || 0)}"
+                                       data-returnable="${returnable}">
+                                <button type="button" class="btn btn-outline-secondary btn-max-qty" title="Fill max returnable">Max</button>
+                            </div>
                         </td>
                         <td class="text-end">${formatMoney(item.rate)}</td>
                         <td class="text-end return-amount">Tk 0.00</td>
                         <td>
-                            <select name="items[${item.id}][condition]" class="form-select form-select-sm">
+                            <select name="items[${item.id}][condition]" class="form-select form-select-sm" title="Initial assessment — warehouse verifies on confirm">
                                 <option value="Good">Good</option>
                                 <option value="Damage">Damage</option>
                             </select>
@@ -320,7 +324,15 @@
             this.detailsDiv.innerHTML = `
                 <div class="sr-create-form-card">
                     <div class="sr-create-form-card-head">
-                        <i class="fas fa-list-ul me-1"></i> Enter return quantities (max = returnable)
+                        <span class="sr-create-step-badge">2</span>
+                        <div>
+                            <strong>Enter return quantities</strong>
+                            <p class="mb-0 small text-muted">Max = returnable · Condition is verified again at warehouse confirm</p>
+                        </div>
+                    </div>
+                    <div class="sr-create-pending-notice" role="note">
+                        <i class="fas fa-info-circle"></i>
+                        Saving creates a <strong>pending</strong> return — no stock or credit until warehouse confirms (Step 2).
                     </div>
                     <form id="${this.id}_returnForm" class="p-2 p-md-3">
                         <input type="hidden" name="csrf_token" value="${escapeHtml(getCsrfToken())}">
@@ -337,7 +349,7 @@
                                         <th class="text-center">Return qty</th>
                                         <th class="text-end">Rate</th>
                                         <th class="text-end">Amount</th>
-                                        <th>Condition</th>
+                                        <th>Condition <span class="text-muted fw-normal">(initial)</span></th>
                                     </tr>
                                 </thead>
                                 <tbody>${rows}</tbody>
@@ -368,6 +380,16 @@
             form.querySelectorAll('.return-qty').forEach((input) => {
                 input.addEventListener('input', () => this.calculateRow(input));
                 input.addEventListener('change', () => this.calculateRow(input));
+            });
+            form.querySelectorAll('.btn-max-qty').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const input = btn.closest('.input-group')?.querySelector('.return-qty');
+                    if (!input) return;
+                    const max = parseFloat(input.dataset.returnable) || parseFloat(input.max) || 0;
+                    input.value = max > 0 ? String(max) : '0';
+                    this.calculateRow(input);
+                    input.focus();
+                });
             });
             form.querySelector('[data-action="cancel-form"]').addEventListener('click', () => this.resetWorkspace());
             form.addEventListener('submit', (e) => this.submitReturn(e));
@@ -467,22 +489,31 @@
                     const slipUrl =
                         result.slip_url ||
                         (result.return_id ? `${BASE_URL}SalesReturn/slip/${result.return_id}` : '');
+                    const confirmUrl =
+                        result.confirm_url ||
+                        (result.return_id ? `${BASE_URL}SalesReturn/confirm/${result.return_id}` : '');
 
                     document.dispatchEvent(new CustomEvent('salesReturn:created', { detail: result }));
 
                     Swal.fire({
-                        title: 'Return created',
-                        text: result.message || 'Pending warehouse confirmation.',
+                        title: 'Return saved — Step 1 complete',
+                        html:
+                            '<p class="mb-2">' + escapeHtml(result.message || 'Pending warehouse confirmation.') + '</p>' +
+                            '<p class="small text-muted mb-0">Warehouse staff should complete <strong>Step 2 — Confirm</strong> to post stock and credit note.</p>',
                         icon: 'success',
                         confirmButtonText: 'Print slip',
-                        showCancelButton: !!slipUrl,
-                        cancelButtonText: 'Done',
+                        showDenyButton: !!confirmUrl,
+                        denyButtonText: 'Go to warehouse confirm',
+                        showCancelButton: true,
+                        cancelButtonText: 'Back to list',
                     }).then((swalResult) => {
                         if (typeof this.onSaved === 'function') {
-                            this.onSaved(swalResult, slipUrl, result);
+                            this.onSaved(swalResult, slipUrl, result, confirmUrl);
                         } else if (swalResult.isConfirmed && slipUrl) {
                             window.location.href = slipUrl;
-                        } else if (!swalResult.isConfirmed) {
+                        } else if (swalResult.isDenied && confirmUrl) {
+                            window.location.href = confirmUrl;
+                        } else if (swalResult.dismiss === Swal.DismissReason.cancel) {
                             window.location.href = `${BASE_URL}SalesReturn`;
                         } else {
                             this.resetWorkspace();
@@ -517,11 +548,13 @@
         document.querySelectorAll('[data-sr-workspace]').forEach((root) => {
             const offcanvas = root.closest('.offcanvas');
             const ws = new SalesReturnWorkspace(root, {
-                onSaved(swalResult, slipUrl, result) {
+                onSaved(swalResult, slipUrl, result, confirmUrl) {
                     if (offcanvas) {
                         const oc = bootstrap.Offcanvas.getInstance(offcanvas);
                         if (swalResult.isConfirmed && slipUrl) {
                             window.open(slipUrl, '_blank');
+                        } else if (swalResult.isDenied && confirmUrl) {
+                            window.location.href = confirmUrl;
                         }
                         ws.resetWorkspace();
                         if (oc) oc.hide();
@@ -529,7 +562,9 @@
                     }
                     if (swalResult.isConfirmed && slipUrl) {
                         window.location.href = slipUrl;
-                    } else if (!swalResult.isConfirmed) {
+                    } else if (swalResult.isDenied && confirmUrl) {
+                        window.location.href = confirmUrl;
+                    } else if (swalResult.dismiss === Swal.DismissReason.cancel) {
                         window.location.href = `${BASE_URL}SalesReturn`;
                     } else {
                         ws.resetWorkspace();

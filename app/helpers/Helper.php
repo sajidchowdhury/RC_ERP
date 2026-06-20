@@ -44,7 +44,7 @@ require_once __DIR__ . '/../../core/Database.php';
         ";
 
         if (!$includeDeleted) {
-            $sql .= " WHERE (e.deleted_at IS NULL OR e.deleted_at = '0000-00-00 00:00:00')";
+            $sql .= " WHERE e.deleted_at IS NULL";
         }
 
         $sql .= " ORDER BY e.name ASC";
@@ -137,7 +137,7 @@ require_once __DIR__ . '/../../core/Database.php';
             ";
 
             if (!$includeDeleted) {
-                $sql .= " WHERE (u.deleted_at IS NULL OR u.deleted_at = '0000-00-00 00:00:00')";
+                $sql .= " WHERE u.deleted_at IS NULL";
             }
 
             $sql .= " ORDER BY e.name ASC";
@@ -299,21 +299,20 @@ public function Get_Branch_By_Id($id) {
     }
 
  public function Product_Price_Now($id) {
-    $this->db->query("
-        SELECT 
-            COALESCE(ph.sales_rate) as price
-        FROM products p
-        LEFT JOIN product_price_history ph 
-            ON p.id = ph.product_id 
-           AND ph.effective_from = (
-                SELECT MAX(effective_from) 
-                FROM product_price_history 
-                WHERE product_id = p.id
-           )
-        WHERE p.id = :id
-    ");
-    $this->db->bind(':id', $id);
-    return $this->db->single();
+    require_once __DIR__ . '/../models/ProductModel.php';
+    $model = new ProductModel();
+    $price = $model->getCurrentPrice((int)$id);
+
+    if (!$price) {
+        return ['price' => null, 'min_rate' => null, 'max_rate' => null, 'default_rate' => null];
+    }
+
+    return [
+        'price'         => $price['default_rate'],
+        'min_rate'      => $price['min_rate'],
+        'max_rate'      => $price['max_rate'],
+        'default_rate'  => $price['default_rate'],
+    ];
 }
 
 
@@ -595,10 +594,23 @@ public function Get_Branch_By_Id($id) {
 /** search */
 
     public function Search_Customers($term) {
-        $this->db->query("SELECT id, customer_name, shop_name, mobile, credit_limit 
-                          FROM customers 
-                          WHERE (customer_name LIKE :term OR shop_name LIKE :term OR mobile LIKE :term) 
-                            AND is_active = 1 LIMIT 20");
+        $this->db->query("SELECT id, customer_code, customer_name, shop_name, mobile, credit_limit
+                          FROM customers
+                          WHERE (customer_name LIKE :term OR shop_name LIKE :term OR mobile LIKE :term OR customer_code LIKE :term)
+                            AND is_active = 1
+                          ORDER BY shop_name ASC
+                          LIMIT 20");
+        $this->db->bind(':term', "%$term%");
+        return $this->db->resultSet();
+    }
+
+    public function Search_Suppliers($term) {
+        $this->db->query("SELECT id, supplier_code, supplier_name, mobile, address
+                          FROM suppliers
+                          WHERE (supplier_name LIKE :term OR mobile LIKE :term OR supplier_code LIKE :term OR address LIKE :term)
+                            AND is_active = 1
+                          ORDER BY supplier_name ASC
+                          LIMIT 20");
         $this->db->bind(':term', "%$term%");
         return $this->db->resultSet();
     }
@@ -608,6 +620,19 @@ public function Get_Branch_By_Id($id) {
         $svc = new StockAvailabilityService($this->db);
 
         return $svc->searchProductsWithStock($term, (int)$branch_id);
+    }
+
+    /**
+     * Barcode / scanner — exact product_code lookup with branch stock.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function Search_Product_By_Exact_Code($code, $branch_id)
+    {
+        require_once __DIR__ . '/../services/Stock/StockAvailabilityService.php';
+        $svc = new StockAvailabilityService($this->db);
+
+        return $svc->findProductByExactCode((string)$code, (int)$branch_id);
     }
 
 
@@ -683,6 +708,62 @@ public function Get_Warehouse_Available_Stock($product_id, $warehouse_id, $exclu
     $svc = new StockAvailabilityService($this->db);
 
     return $svc->getWarehouseAvailableQty((int)$product_id, (int)$warehouse_id, $exclude_invoice_id ? (int)$exclude_invoice_id : null);
+}
+
+/**
+ * Fail when outbound qty exceeds warehouse available (physical minus sales pipeline).
+ *
+ * @param array<int, array{product_id:int, warehouse_id:int, qty:float}> $lines
+ */
+public function Assert_Warehouse_Lines_Available(array $lines, ?int $exclude_invoice_id = null): void
+{
+    $needed = [];
+    foreach ($lines as $line) {
+        $productId = (int)($line['product_id'] ?? 0);
+        $warehouseId = (int)($line['warehouse_id'] ?? 0);
+        $qty = (float)($line['qty'] ?? 0);
+        if ($productId <= 0 || $warehouseId <= 0 || $qty <= 0) {
+            continue;
+        }
+        $key = $warehouseId . ':' . $productId;
+        $needed[$key] = [
+            'product_id'   => $productId,
+            'warehouse_id' => $warehouseId,
+            'qty'          => ($needed[$key]['qty'] ?? 0) + $qty,
+        ];
+    }
+
+    foreach ($needed as $row) {
+        $this->Assert_Warehouse_Stock_Available(
+            (int)$row['product_id'],
+            (int)$row['warehouse_id'],
+            (float)$row['qty'],
+            $exclude_invoice_id
+        );
+    }
+}
+
+public function Assert_Warehouse_Stock_Available(
+    int $product_id,
+    int $warehouse_id,
+    float $requested_qty,
+    ?int $exclude_invoice_id = null
+): void {
+    if ($requested_qty <= 0) {
+        return;
+    }
+
+    $available = $this->Get_Warehouse_Available_Stock($product_id, $warehouse_id, $exclude_invoice_id);
+    if ($requested_qty > $available + 0.0001) {
+        $balance = $this->Get_Product_Stock_Balance($product_id, null, $warehouse_id);
+        throw new Exception(
+            'Insufficient available stock for product #' . $product_id
+            . ': requested ' . number_format($requested_qty, 2)
+            . ', available ' . number_format($available, 2)
+            . ' (physical ' . number_format((float)($balance['physical'] ?? 0), 2)
+            . ', sales pipeline ' . number_format((float)($balance['pending_out'] ?? 0), 2) . ').'
+        );
+    }
 }
 
 /**
@@ -882,45 +963,169 @@ public function insertSupplierLedgerEntry(array $entry): void
  *
  * @return array<int, array{customer_id: int, shop_name: string, last_balance: float, computed_balance: float, difference: float}>
  */
-public function getCustomerLedgerBalanceMismatches(float $tolerance = 0.02, ?int $branchId = null): array
+public function getCustomerLedgerBalanceMismatches(float $tolerance = 0.02, ?int $branchId = null, int $limit = 100): array
 {
+    return $this->getSubledgerRunningBalanceMismatches(
+        'customer',
+        $tolerance,
+        $branchId,
+        $limit
+    );
+}
+
+/**
+ * Suppliers where last running_balance ≠ sum(debit − credit).
+ *
+ * @return array<int, array{supplier_id: int, supplier_name: string, last_balance: float, computed_balance: float, difference: float}>
+ */
+public function getSupplierLedgerBalanceMismatches(float $tolerance = 0.02, ?int $branchId = null, int $limit = 100): array
+{
+    return $this->getSubledgerRunningBalanceMismatches(
+        'supplier',
+        $tolerance,
+        $branchId,
+        $limit
+    );
+}
+
+/**
+ * Employees where last running_balance ≠ sum(debit − credit).
+ *
+ * @return array<int, array{employee_id: int, employee_name: string, last_balance: float, computed_balance: float, difference: float}>
+ */
+public function getEmployeeLedgerBalanceMismatches(float $tolerance = 0.02, ?int $branchId = null, int $limit = 100): array
+{
+    return $this->getSubledgerRunningBalanceMismatches(
+        'employee',
+        $tolerance,
+        $branchId,
+        $limit
+    );
+}
+
+/**
+ * @return array<int, array<string, mixed>>
+ */
+private function getSubledgerRunningBalanceMismatches(
+    string $entityType,
+    float $tolerance,
+    ?int $branchId,
+    int $limit
+): array {
     $tolerance = max(0.0001, $tolerance);
-    $branchSql = '';
-    if ($branchId !== null && $branchId > 0) {
-        $branchSql = ' AND (cl.branch_id = ' . (int)$branchId . ' OR cl.branch_id IS NULL)';
+    $limit = max(1, min(100, $limit));
+
+    if ($entityType === 'customer') {
+        $branchSql = '';
+        if ($branchId !== null && $branchId > 0) {
+            $branchSql = ' AND (cl.branch_id = ' . (int)$branchId . ' OR cl.branch_id IS NULL)';
+        }
+
+        $this->db->query("
+            SELECT
+                lb.customer_id,
+                c.shop_name,
+                c.customer_name,
+                lb.last_balance,
+                COALESCE(cb.computed_balance, 0) AS computed_balance,
+                ABS(lb.last_balance - COALESCE(cb.computed_balance, 0)) AS difference
+            FROM (
+                SELECT cl1.customer_id, cl1.running_balance AS last_balance
+                FROM customer_ledger cl1
+                INNER JOIN (
+                    SELECT customer_id, MAX(id) AS max_id
+                    FROM customer_ledger
+                    WHERE COALESCE(is_reversed, 0) = 0
+                    GROUP BY customer_id
+                ) latest ON cl1.id = latest.max_id
+                WHERE COALESCE(cl1.is_reversed, 0) = 0
+            ) lb
+            INNER JOIN customers c ON c.id = lb.customer_id
+            LEFT JOIN (
+                SELECT cl.customer_id, SUM(cl.debit) - SUM(cl.credit) AS computed_balance
+                FROM customer_ledger cl
+                WHERE COALESCE(cl.is_reversed, 0) = 0 {$branchSql}
+                GROUP BY cl.customer_id
+            ) cb ON cb.customer_id = lb.customer_id
+            WHERE ABS(lb.last_balance - COALESCE(cb.computed_balance, 0)) > :tol
+            ORDER BY difference DESC
+            LIMIT {$limit}
+        ");
+    } elseif ($entityType === 'supplier') {
+        $branchSql = '';
+        if ($branchId !== null && $branchId > 0) {
+            $branchSql = ' AND (sl.branch_id = ' . (int)$branchId . ' OR sl.branch_id IS NULL)';
+        }
+
+        $this->db->query("
+            SELECT
+                lb.supplier_id,
+                s.supplier_name,
+                lb.last_balance,
+                COALESCE(cb.computed_balance, 0) AS computed_balance,
+                ABS(lb.last_balance - COALESCE(cb.computed_balance, 0)) AS difference
+            FROM (
+                SELECT sl1.supplier_id, sl1.running_balance AS last_balance
+                FROM supplier_ledger sl1
+                INNER JOIN (
+                    SELECT supplier_id, MAX(id) AS max_id
+                    FROM supplier_ledger
+                    WHERE COALESCE(is_reversed, 0) = 0
+                    GROUP BY supplier_id
+                ) latest ON sl1.id = latest.max_id
+                WHERE COALESCE(sl1.is_reversed, 0) = 0
+            ) lb
+            INNER JOIN suppliers s ON s.id = lb.supplier_id
+            LEFT JOIN (
+                SELECT sl.supplier_id, SUM(sl.debit) - SUM(sl.credit) AS computed_balance
+                FROM supplier_ledger sl
+                WHERE COALESCE(sl.is_reversed, 0) = 0 {$branchSql}
+                GROUP BY sl.supplier_id
+            ) cb ON cb.supplier_id = lb.supplier_id
+            WHERE ABS(lb.last_balance - COALESCE(cb.computed_balance, 0)) > :tol
+            ORDER BY difference DESC
+            LIMIT {$limit}
+        ");
+    } else {
+        $branchSql = '';
+        if ($branchId !== null && $branchId > 0) {
+            $branchSql = ' AND e.branch_id = ' . (int)$branchId;
+        }
+
+        $this->db->query("
+            SELECT
+                lb.employee_id,
+                e.name AS employee_name,
+                lb.last_balance,
+                COALESCE(cb.computed_balance, 0) AS computed_balance,
+                ABS(lb.last_balance - COALESCE(cb.computed_balance, 0)) AS difference
+            FROM (
+                SELECT el1.employee_id, el1.running_balance AS last_balance
+                FROM employee_ledger el1
+                INNER JOIN (
+                    SELECT employee_id, MAX(id) AS max_id
+                    FROM employee_ledger
+                    WHERE COALESCE(is_reversed, 0) = 0
+                    GROUP BY employee_id
+                ) latest ON el1.id = latest.max_id
+                WHERE COALESCE(el1.is_reversed, 0) = 0
+            ) lb
+            INNER JOIN employees e ON e.id = lb.employee_id {$branchSql}
+            LEFT JOIN (
+                SELECT el.employee_id, SUM(el.debit) - SUM(el.credit) AS computed_balance
+                FROM employee_ledger el
+                WHERE COALESCE(el.is_reversed, 0) = 0
+                GROUP BY el.employee_id
+            ) cb ON cb.employee_id = lb.employee_id
+            WHERE ABS(lb.last_balance - COALESCE(cb.computed_balance, 0)) > :tol
+            ORDER BY difference DESC
+            LIMIT {$limit}
+        ");
     }
 
-    $this->db->query("
-        SELECT
-            lb.customer_id,
-            c.shop_name,
-            c.customer_name,
-            lb.last_balance,
-            COALESCE(cb.computed_balance, 0) AS computed_balance,
-            ABS(lb.last_balance - COALESCE(cb.computed_balance, 0)) AS difference
-        FROM (
-            SELECT cl1.customer_id, cl1.running_balance AS last_balance
-            FROM customer_ledger cl1
-            INNER JOIN (
-                SELECT customer_id, MAX(id) AS max_id
-                FROM customer_ledger
-                GROUP BY customer_id
-            ) latest ON cl1.id = latest.max_id
-        ) lb
-        INNER JOIN customers c ON c.id = lb.customer_id
-        LEFT JOIN (
-            SELECT cl.customer_id, SUM(cl.debit) - SUM(cl.credit) AS computed_balance
-            FROM customer_ledger cl
-            WHERE 1=1 {$branchSql}
-            GROUP BY cl.customer_id
-        ) cb ON cb.customer_id = lb.customer_id
-        WHERE ABS(lb.last_balance - COALESCE(cb.computed_balance, 0)) > :tol
-        ORDER BY difference DESC
-        LIMIT 100
-    ");
     $this->db->bind(':tol', $tolerance);
-
     $rows = $this->db->resultSet();
+
     return is_array($rows) ? $rows : [];
 }
 
